@@ -11,6 +11,16 @@ pygame.init()
 pygame.joystick.init()
 
 # -------------------------------
+# RENDER LEADERBOARD (PUBLIC)
+# -------------------------------
+BASE_URL = "https://iot-project-87on.onrender.com"
+API_URL = BASE_URL + "/api/leaderboard"
+SUBMIT_URL = BASE_URL + "/submit_result"
+LEADERBOARD_WEB_URL = BASE_URL + "/"
+# -------------------------------
+
+
+# -------------------------------
 # NES CONTROLLER MAPPING (confirmed)
 # -------------------------------
 DPAD_LEFT_BTN  = 13
@@ -291,8 +301,7 @@ q_buttons = []
 # SERVER SUBMISSION
 # ---------------------------------------------------------------------
 def submit_result_to_server(name, email, time_s, outcome):
-    url = "http://127.0.0.1:5000/submit_result"
-    payload = {
+    url = SUBMIT_URLpayload = {
         "name": name or "Player",
         "email": email or "",
         "time_s": float(time_s),
@@ -524,22 +533,65 @@ def draw_button(rect, label, active=False):
                       rect.centery - txt.get_height() // 2))
 
 def draw_menu():
-    screen.fill(BLACK)
-    title = FONT_XL.render("WASK", True, WHITE)
-    screen.blit(title, (WIDTH // 2 - title.get_width() // 2, int(HEIGHT * 0.2)))
+    """Cyber-Shadow style menu (keeps same buttons/rects)."""
+    # Background image if available, then dark overlay
+    if "background2" in globals() and background2 is not None:
+        bg = pygame.transform.smoothscale(background2, (WIDTH, HEIGHT))
+        screen.blit(bg, (0, 0))
+        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 190))
+        screen.blit(overlay, (0, 0))
+    else:
+        screen.fill((5, 5, 12))
 
-    bw, bh = int(WIDTH * 0.22), int(HEIGHT * 0.08)
-    play_rect  = pygame.Rect(WIDTH // 2 - bw // 2, int(HEIGHT * 0.40), bw, bh)
-    board_rect = pygame.Rect(WIDTH // 2 - bw // 2, int(HEIGHT * 0.53), bw, bh)
-    quit_rect  = pygame.Rect(WIDTH // 2 - bw // 2, int(HEIGHT * 0.66), bw, bh)
+    # Subtle scanlines
+    scan = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    for y in range(0, HEIGHT, 4):
+        scan.fill((0, 0, 0, 18), rect=pygame.Rect(0, y, WIDTH, 2))
+    screen.blit(scan, (0, 0))
+
+    # Title with glow
+    title_text = "WASK"
+    title_surf = FONT_XL.render(title_text, True, (255, 60, 60))
+    title_rect = title_surf.get_rect(center=(WIDTH // 2, int(HEIGHT * 0.20)))
+    for off in [(2, 0), (-2, 0), (0, 2), (0, -2)]:
+        glow = FONT_XL.render(title_text, True, (140, 20, 20))
+        screen.blit(glow, title_rect.move(off))
+    screen.blit(title_surf, title_rect)
+
+    tagline = "CYBER OPERATIONS SIM"
+    tag_surf = FONT_SM.render(tagline, True, (200, 200, 210))
+    screen.blit(tag_surf, tag_surf.get_rect(center=(WIDTH // 2, title_rect.bottom + int(HEIGHT * 0.03))))
+
+    bw, bh = int(WIDTH * 0.30), int(HEIGHT * 0.075)
+    gap = int(HEIGHT * 0.03)
+    start_y = int(HEIGHT * 0.38)
+
+    play_rect  = pygame.Rect(WIDTH // 2 - bw // 2, start_y, bw, bh)
+    board_rect = pygame.Rect(WIDTH // 2 - bw // 2, start_y + (bh + gap), bw, bh)
+    quit_rect  = pygame.Rect(WIDTH // 2 - bw // 2, start_y + 2 * (bh + gap), bw, bh)
 
     mx, my = pygame.mouse.get_pos()
-    draw_button(play_rect,  "Play",        play_rect.collidepoint(mx, my))
-    draw_button(board_rect, "Leaderboard", board_rect.collidepoint(mx, my))
-    draw_button(quit_rect,  "Quit",        quit_rect.collidepoint(mx, my))
+
+    def cyber_button(rect, text, hover):
+        fill = (28, 28, 36) if hover else (18, 18, 26)
+        edge = (255, 60, 60) if hover else (90, 90, 105)
+        pygame.draw.rect(screen, fill, rect, border_radius=12)
+        pygame.draw.rect(screen, edge, rect, 3, border_radius=12)
+        inner = rect.inflate(-10, -10)
+        pygame.draw.rect(screen, (10, 10, 14), inner, 2, border_radius=10)
+        txt = FONT_MD.render(text.upper(), True, (245, 245, 250))
+        screen.blit(txt, txt.get_rect(center=rect.center))
+
+    cyber_button(play_rect,  "Play",        play_rect.collidepoint(mx, my))
+    cyber_button(board_rect, "Leaderboard", board_rect.collidepoint(mx, my))
+    cyber_button(quit_rect,  "Quit",        quit_rect.collidepoint(mx, my))
+
+    hint = "START/SELECT: play    CLICK: select    ESC: quit"
+    hint_surf = FONT_SM.render(hint, True, (170, 170, 180))
+    screen.blit(hint_surf, hint_surf.get_rect(center=(WIDTH // 2, int(HEIGHT * 0.92))))
 
     return play_rect, board_rect, quit_rect
-
 def draw_name_entry():
     screen.fill((25, 25, 25))
     title = FONT_LG.render("Enter your details", True, WHITE)
@@ -734,7 +786,8 @@ while running:
                 email_text = ""
                 typing_name = True
             elif board_r.collidepoint(click_pos):
-                webbrowser.open("http://127.0.0.1:5000/")
+                webbrowser.open(LEADERBOARD_WEB_URL)
+
             elif quit_r.collidepoint(click_pos):
                 running = False
 
@@ -991,5 +1044,8 @@ while running:
 
 pygame.quit()
 sys.exit()
+
+
+
 
 
