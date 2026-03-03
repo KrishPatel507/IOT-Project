@@ -5,6 +5,7 @@ import webbrowser
 from pathlib import Path
 
 import pygame
+import math
 import requests
 
 pygame.init()
@@ -25,13 +26,13 @@ LEADERBOARD_WEB_URL = BASE_URL + "/"
 # -------------------------------
 DPAD_LEFT_BTN  = 13
 DPAD_RIGHT_BTN = 14
-DPAD_UP_BTN    = 11
+DPAD_UP_BTN    = 11  # (unused for jump now; kept for reference)
 
 BTN_START      = 6
 BTN_SELECT     = 4
 
 BTN_A          = 0   # Attack
-BTN_B          = 1   # Block (reserved)
+BTN_B          = 1   # Jump
 
 # Controller object (optional; keyboard still works)
 joy = None
@@ -39,6 +40,13 @@ if pygame.joystick.get_count() > 0:
     joy = pygame.joystick.Joystick(0)
     joy.init()
     print("Controller detected:", joy.get_name())
+    # Auto-map Switch NES / Nintendo controllers (common SDL mapping: B=0, A=1)
+    _nm = joy.get_name().lower()
+    if "nes" in _nm or "nintendo" in _nm:
+        # Swap A/B so B = jump and A = attack on most Switch-style pads
+        BTN_B = 0
+        BTN_A = 1
+        print("Applied Nintendo-style A/B mapping: BTN_B=0 (Jump), BTN_A=1 (Attack)")
 else:
     print("No controller detected (keyboard still works).")
 
@@ -140,6 +148,7 @@ can_double_jump = True
 facing = 1
 lives = 3
 
+player_invuln_until = 0  # ms timestamp; brief invulnerability after taking damage
 MOVE_SPEED = ss(5)
 GRAVITY    = 0.6 * S
 JUMP_FORCE = -16 * S
@@ -194,6 +203,7 @@ LEVELS_BASE = [
         "platforms": [],
         "collectibles": [],
         "boss": {
+            "type": "boss3",
             "hp": 12,
             "jump_power": -14,
             "gravity": 0.7,
@@ -201,6 +211,65 @@ LEVELS_BASE = [
             "air_hover_ms": 1000,    # 1s hover
             "land_cooldown_ms": 2000,  # 2s on ground
             "touch_damage": True,
+        },
+    },
+    {   # LEVEL 4 – BOSS 4 (Sentinel shooter: 3 single shots, punish window, then dash)
+    "spawn": (80, BASE_H - 100),
+    "enemies": [],
+    "platforms": [],
+    "collectibles": [],
+    "boss": {
+        "type": "boss4",
+        "hp": 14,
+        "touch_damage": True,
+
+        # Boss 4 pattern:
+        #   shot -> wait -> shot -> wait -> shot
+        #   (small punish window) -> dash to opposite side
+        #   (cooldown) -> repeat
+        "shot_gap_ms": 850,            # time between each single shot (more reaction time)
+        "post_shots_pause_ms": 1300,   # time after 3rd shot before the dash (player can punish)
+        "cycle_cooldown_ms": 2400,     # time after dash before starting again
+        "proj_speed": 10,
+        "dash_speed": 14,
+    },
+},
+{   # LEVEL 5 – BOSS 5 (3 ground slashes + 1s gaps + swap sides)
+        "spawn": (80, BASE_H - 100),
+        "enemies": [],
+        "platforms": [],
+        "collectibles": [],
+        "boss": {
+            "type": "boss5",
+            "hp": 16,
+            "touch_damage": True,
+            "slash_count": 3,
+            "slash_gap_ms": 1000,
+            "slash_speed": 12,
+            "slash_width": 220,
+            "slash_height": 24,
+            "slash_ttl_ms": 1100,
+            "swap_pause_ms": 700,
+        },
+    },
+    {   # LEVEL 6 – BOSS 6 (Agile duelist: dash + recovery + needle fan)
+        "spawn": (80, BASE_H - 100),
+        "enemies": [],
+        "platforms": [],
+        "collectibles": [],
+        "boss": {
+            "type": "boss6",
+            "hp": 18,
+            "touch_damage": True,
+            "dash_windup_ms": 260,
+            "dash_time_ms": 260,
+            "dash_speed": 16,
+            "dash_recover_ms": 750,
+            "needle_windup_ms": 280,
+            "needle_count": 3,
+            "needle_gap_ms": 180,
+            "needle_speed": 9,
+            "needle_ttl_ms": 1400,
         },
     },
 ]
@@ -233,9 +302,10 @@ def build_levels():
         # boss config
         if L["boss"]:
             cfg = dict(L["boss"])
-            cfg["jump_power"] *= S
-            cfg["gravity"]    *= S
-            cfg["speed_x"]    *= S
+            # Only scale keys that exist (Boss 4/5/6 use different keys)
+            for k in ("jump_power", "gravity", "speed_x", "proj_speed", "lane_speed", "slash_speed", "dash_speed", "needle_speed"):
+                if k in cfg:
+                    cfg[k] *= S
             lvl["boss_cfg"] = cfg
         else:
             lvl["boss_cfg"] = None
@@ -255,9 +325,15 @@ collectibles = []
 collected = []
 portal = None
 
+# Boss flow: after a boss is defeated we spawn a portal that leads to the
+# question screen before advancing to the next boss.
+boss_defeated = False
+
 # boss state
 boss = None
 boss_hp = 0
+boss_max_hp = 0
+boss_aux = {}
 boss_vx = 0.0
 boss_vy = 0.0
 boss_state = "ground"
@@ -301,7 +377,8 @@ q_buttons = []
 # SERVER SUBMISSION
 # ---------------------------------------------------------------------
 def submit_result_to_server(name, email, time_s, outcome):
-    url = SUBMIT_URLpayload = {
+    url = SUBMIT_URL
+    payload = {
         "name": name or "Player",
         "email": email or "",
         "time_s": float(time_s),
@@ -318,7 +395,8 @@ def submit_result_to_server(name, email, time_s, outcome):
 def reset_level(idx):
     global enemies, enemy_dirs, enemy_alive
     global platforms, collectibles, collected, portal
-    global boss, boss_hp, boss_vx, boss_vy, boss_state, boss_next_time, hazards
+    global boss, boss_hp, boss_max_hp, boss_aux, boss_vx, boss_vy, boss_state, boss_next_time, hazards
+    global boss_defeated
     global player_vel_y, player_on_ground, can_double_jump
 
     L = levels[idx]
@@ -338,6 +416,8 @@ def reset_level(idx):
 
     portal = None
 
+    boss_defeated = False
+
     cfg = L["boss_cfg"]
     boss = None
     boss_hp = 0
@@ -353,6 +433,8 @@ def reset_level(idx):
         boss = pygame.Rect(bx, by, size, size)
         boss_hp = cfg["hp"]
 
+        boss_max_hp = boss_hp
+        boss_aux = {}
     # write back globals
     globals().update({
         "enemies": enemies,
@@ -429,78 +511,103 @@ def spawn_shockwaves(x_center, y_bottom):
 def update_hazards():
     global hazards
     new_list = []
+
     for hz in hazards:
+        kind = hz.get("kind", "shockwave")
         r = hz["rect"]
-        if hz["dir"] > 0:
-            r.width += hz["speed"]
-        else:
-            r.x -= hz["speed"]
-            r.width += hz["speed"]
-        hz["life"] -= 1
+
+        if kind == "shockwave":
+            # expanding wave
+            if hz["dir"] > 0:
+                r.width += hz["speed"]
+            else:
+                r.x -= hz["speed"]
+                r.width += hz["speed"]
+            hz["life"] -= 1
+
+        elif kind == "slash":
+            r.x += int(hz.get("vx", 0))
+            hz["life"] -= 1
+
+        elif kind == "proj":
+            r.x += int(hz.get("vx", 0))
+            r.y += int(hz.get("vy", 0))
+            hz["life"] -= 1
+
+        elif kind == "lane":
+            r.y += int(hz.get("vy", 0))
+            hz["life"] -= 1
+
+        # collision
         if player.colliderect(r):
             damage_player()
-        if hz["life"] > 0 and r.width > 0:
+
+        # keep on screen and alive
+        if hz["life"] > 0 and r.right > -250 and r.left < WIDTH + 250 and r.top < HEIGHT + 350:
             new_list.append(hz)
+
     hazards = new_list
 
 # ---------------------------------------------------------------------
 # BOSS
 # ---------------------------------------------------------------------
 def update_boss():
-    global boss, boss_hp, boss_vx, boss_vy, boss_state, boss_next_time, projectiles, game_state
+    global boss, boss_hp, boss_max_hp, boss_aux
+    global boss_vx, boss_vy, boss_state, boss_next_time, projectiles, game_state, level_index
+    global boss_defeated, portal
 
     if boss is None:
         return
 
     cfg = levels[level_index]["boss_cfg"]
-    g = cfg["gravity"]
-    jump = cfg["jump_power"]
-    speed = cfg["speed_x"]
-    hover_ms = cfg["air_hover_ms"]
-    land_ms  = cfg["land_cooldown_ms"]
-
     now = pygame.time.get_ticks()
+    btype = cfg.get("type", "boss3")
 
-    if boss_state == "ground":
-        boss.bottom = GROUND_Y
-        boss_vy = 0
-        if now >= boss_next_time:
-            target_x = player.centerx
-            boss_vx = speed if boss.centerx < target_x else -speed
-            boss_vy = jump
-            boss_state = "takeoff"
+    # Helpers
+    def spawn_slash_wave(direction):
+        w = int(cfg.get("slash_width", ss(220)))
+        h = int(cfg.get("slash_height", ss(24)))
+        y = GROUND_Y - h
+        if direction > 0:
+            x = boss.right - ss(10)
+        else:
+            x = boss.left - w + ss(10)
+        hazards.append({
+            "kind": "slash",
+            "rect": pygame.Rect(int(x), int(y), int(w), int(h)),
+            "vx": int(cfg.get("slash_speed", ss(12)) * direction),
+            "life": int(cfg.get("slash_ttl_ms", 1100) / 16),
+        })
 
-    elif boss_state == "takeoff":
-        boss_vy += g
-        boss_vx = speed if boss.centerx < player.centerx else -speed
-        boss.x += int(boss_vx)
-        boss.y += int(boss_vy)
-        if boss_vy >= 0:
-            boss_state = "hover"
-            boss_vx = 0
-            boss_vy = 0
-            boss_next_time = now + hover_ms
+    def spawn_projectile(vx, vy, w=ss(14), h=ss(8), ttl_ms=1400):
+        hazards.append({
+            "kind": "proj",
+            "rect": pygame.Rect(boss.centerx, boss.centery, int(w), int(h)),
+            "vx": int(vx),
+            "vy": int(vy),
+            "life": int(ttl_ms / 16),
+        })
 
-    elif boss_state == "hover":
-        if now >= boss_next_time:
-            boss_state = "fall"
-            boss_vy = 16 * S
-            boss_vx = 0
+    def spawn_lane(x_center):
+        lane_w = int(cfg.get("lane_width", ss(34)))
+        lane_h = int(cfg.get("lane_height", ss(240)))
+        x = int(x_center - lane_w // 2)
+        y = int(ss(120))
+        vy = int(cfg.get("lane_speed", ss(9)))
+        hazards.append({
+            "kind": "lane",
+            "rect": pygame.Rect(x, y, lane_w, lane_h),
+            "vy": vy,
+            "life": int(cfg.get("lane_ttl_ms", 1600) / 16),
+        })
 
-    elif boss_state == "fall":
-        boss_vy += g
-        boss.y += int(boss_vy)
-        if boss.bottom >= GROUND_Y:
-            boss.bottom = GROUND_Y
-            spawn_shockwaves(boss.centerx, boss.bottom)
-            boss_state = "ground"
-            boss_next_time = now + land_ms
+    # Touch damage
+    if cfg.get("touch_damage", False) and player.colliderect(boss):
+        # respect post-hit invulnerability
+        if pygame.time.get_ticks() >= player_invuln_until:
+            damage_player()
 
-    # touch damage
-    if cfg["touch_damage"] and player.colliderect(boss):
-        damage_player()
-
-    # bullets vs boss
+    # Player bullets vs boss
     new_proj = []
     for rect, d, dist in projectiles:
         rect.x += int(d * BULLET_SPEED)
@@ -511,17 +618,240 @@ def update_boss():
             new_proj.append((rect, d, dist))
     projectiles = new_proj
 
+    # Boss defeated -> spawn portal; question screen; then advance
     if boss_hp <= 0:
-        hazards.clear()
-        game_state = "win"
+        if not boss_defeated:
+            boss_defeated = True
+            hazards.clear()
+            projectiles.clear()
+            boss = None
+            # Portal appears on the right side
+            portal = pygame.Rect(WIDTH - ss(80), GROUND_Y - ss(80), ss(40), ss(80))
+        return
+
+    # ---------------- Boss 3 (your original jumper) ----------------
+    if btype == "boss3":
+        g = cfg["gravity"]
+        jump = cfg["jump_power"]
+        speed = cfg["speed_x"]
+        hover_ms = cfg["air_hover_ms"]
+        land_ms  = cfg["land_cooldown_ms"]
+
+        if boss_state == "ground":
+            boss.bottom = GROUND_Y
+            boss_vy = 0
+            if now >= boss_next_time:
+                boss_vx = speed if boss.centerx < player.centerx else -speed
+                boss_vy = jump
+                boss_state = "takeoff"
+
+        elif boss_state == "takeoff":
+            boss_vy += g
+            boss_vx = speed if boss.centerx < player.centerx else -speed
+            boss.x += int(boss_vx)
+            boss.y += int(boss_vy)
+            if boss_vy >= 0:
+                boss_state = "hover"
+                boss_vx = 0
+                boss_vy = 0
+                boss_next_time = now + hover_ms
+
+        elif boss_state == "hover":
+            if now >= boss_next_time:
+                boss_state = "fall"
+                boss_vy = 16 * S
+                boss_vx = 0
+
+        elif boss_state == "fall":
+            boss_vy += g
+            boss.y += int(boss_vy)
+            if boss.bottom >= GROUND_Y:
+                boss.bottom = GROUND_Y
+                spawn_shockwaves(boss.centerx, boss.bottom)
+                boss_state = "ground"
+                boss_next_time = now + land_ms
+
+        return
+
+    # ---------------- Boss 4: 3 single shots -> punish window -> dash ----------------
+    if btype == "boss4":
+        boss.bottom = GROUND_Y
+
+        # State init
+        boss_aux.setdefault("phase", "cooldown")      # cooldown -> shoot -> punish -> dash
+        boss_aux.setdefault("next_time", now + 900)
+        boss_aux.setdefault("shots_done", 0)
+        boss_aux.setdefault("dash_target_x", None)
+
+        shot_gap = int(cfg.get("shot_gap_ms", 850))
+        punish_pause = int(cfg.get("post_shots_pause_ms", 1300))
+        cycle_cooldown = int(cfg.get("cycle_cooldown_ms", 2400))
+        proj_speed = int(cfg.get("proj_speed", ss(10)))
+        dash_speed = int(cfg.get("dash_speed", ss(14)))
+
+        if boss_aux["phase"] == "cooldown":
+            if now >= boss_aux["next_time"]:
+                boss_aux["phase"] = "shoot"
+                boss_aux["shots_done"] = 0
+                boss_aux["next_time"] = now
+
+        elif boss_aux["phase"] == "shoot":
+            if now >= boss_aux["next_time"]:
+                dirx = 1 if (player.centerx - boss.centerx) >= 0 else -1
+                spawn_projectile(proj_speed * dirx, 0, w=ss(14), h=ss(8), ttl_ms=1500)
+
+                boss_aux["shots_done"] += 1
+                if boss_aux["shots_done"] < 3:
+                    boss_aux["next_time"] = now + shot_gap
+                else:
+                    # Give the player a short punish window after the 3rd shot
+                    boss_aux["phase"] = "punish"
+                    boss_aux["next_time"] = now + punish_pause
+
+        elif boss_aux["phase"] == "punish":
+            if now >= boss_aux["next_time"]:
+                # After the punish window, dash to the opposite side of the arena
+                mid = (LEFT_WALL.right + RIGHT_WALL.left) // 2
+                if boss.centerx < mid:
+                    boss_aux["dash_target_x"] = RIGHT_WALL.left - boss.width - ss(60)
+                else:
+                    boss_aux["dash_target_x"] = LEFT_WALL.right + ss(60)
+                boss_aux["phase"] = "dash"
+
+        elif boss_aux["phase"] == "dash":
+            tx = int(boss_aux["dash_target_x"])
+            if boss.x < tx:
+                boss.x = min(tx, boss.x + dash_speed)
+            else:
+                boss.x = max(tx, boss.x - dash_speed)
+
+            # Clamp inside arena
+            boss.x = max(LEFT_WALL.right + ss(40), min(boss.x, RIGHT_WALL.left - boss.width - ss(40)))
+
+            if boss.x == tx:
+                boss_aux["phase"] = "cooldown"
+                boss_aux["next_time"] = now + cycle_cooldown
+
+        return
+
+    # ---------------- Boss 5: triple slash + swap sides ----------------
+    if btype == "boss5":
+        boss.bottom = GROUND_Y
+        boss_aux.setdefault("phase", "windup")
+        boss_aux.setdefault("slashes_done", 0)
+        boss_aux.setdefault("next_time", now + 400)
+
+        if boss_aux["phase"] == "windup":
+            if now >= boss_aux["next_time"]:
+                boss_aux["phase"] = "slash"
+                boss_aux["next_time"] = now
+
+        elif boss_aux["phase"] == "slash":
+            direction = 1 if player.centerx > boss.centerx else -1
+            spawn_slash_wave(direction)
+            boss_aux["slashes_done"] += 1
+            if boss_aux["slashes_done"] < int(cfg.get("slash_count", 3)):
+                boss_aux["phase"] = "gap"
+                boss_aux["next_time"] = now + int(cfg.get("slash_gap_ms", 1000))
+            else:
+                boss_aux["phase"] = "swap_wait"
+                boss_aux["next_time"] = now + int(cfg.get("swap_pause_ms", 700))
+
+        elif boss_aux["phase"] == "gap":
+            if now >= boss_aux["next_time"]:
+                boss_aux["phase"] = "slash"
+
+        elif boss_aux["phase"] == "swap_wait":
+            if now >= boss_aux["next_time"]:
+                if boss.centerx < WIDTH // 2:
+                    boss.left = RIGHT_WALL.left - boss.width - ss(40)
+                else:
+                    boss.left = LEFT_WALL.right + ss(40)
+                boss_aux["slashes_done"] = 0
+                boss_aux["phase"] = "windup"
+                boss_aux["next_time"] = now + 400
+
+        return
+
+    # ---------------- Boss 6: dash -> recover -> needle fan ----------------
+    if btype == "boss6":
+        boss.bottom = GROUND_Y
+        boss_aux.setdefault("phase", "dash_windup")
+        boss_aux.setdefault("next_time", now + int(cfg.get("dash_windup_ms", 260)))
+        boss_aux.setdefault("dash_dir", 1)
+
+        phase = boss_aux["phase"]
+
+        if phase == "dash_windup":
+            boss_aux["dash_dir"] = 1 if player.centerx > boss.centerx else -1
+            if now >= boss_aux["next_time"]:
+                boss_aux["phase"] = "dash"
+                boss_aux["next_time"] = now + int(cfg.get("dash_time_ms", 260))
+
+        elif phase == "dash":
+            boss.x += int(cfg.get("dash_speed", ss(16)) * boss_aux["dash_dir"])
+            boss.x = max(LEFT_WALL.right + ss(40), min(boss.x, RIGHT_WALL.left - boss.width - ss(40)))
+            if now >= boss_aux["next_time"]:
+                boss_aux["phase"] = "dash_recover"
+                boss_aux["next_time"] = now + int(cfg.get("dash_recover_ms", 750))
+
+        elif phase == "dash_recover":
+            if now >= boss_aux["next_time"]:
+                boss_aux["phase"] = "needle_windup"
+                boss_aux["next_time"] = now + int(cfg.get("needle_windup_ms", 280))
+                boss_aux["needles_done"] = 0
+                boss_aux["next_needle"] = now
+
+        elif phase == "needle_windup":
+            if now >= boss_aux["next_time"]:
+                boss_aux["phase"] = "needles"
+                boss_aux["next_needle"] = now
+
+        elif phase == "needles":
+            if now >= boss_aux.get("next_needle", now):
+                dirx = 1 if player.centerx > boss.centerx else -1
+                spd = int(cfg.get("needle_speed", ss(9))) * dirx
+                spreads = [-3, 0, 3]
+                vy = spreads[boss_aux["needles_done"] % 3]
+                spawn_projectile(spd, vy, w=ss(12), h=ss(8), ttl_ms=int(cfg.get("needle_ttl_ms", 1400)))
+
+                boss_aux["needles_done"] += 1
+                boss_aux["next_needle"] = now + int(cfg.get("needle_gap_ms", 180))
+
+                if boss_aux["needles_done"] >= int(cfg.get("needle_count", 3)):
+                    boss_aux["phase"] = "dash_windup"
+                    boss_aux["next_time"] = now + int(cfg.get("dash_windup_ms", 260))
+
+        return
 
 # ---------------------------------------------------------------------
 # DAMAGE PLAYER
+
 # ---------------------------------------------------------------------
 def damage_player():
-    global lives
+    global lives, player_invuln_until, player_vel_y, player_on_ground, can_double_jump
+
+    now = pygame.time.get_ticks()
+    # If we're currently invulnerable, ignore damage
+    if now < player_invuln_until:
+        return
+
     lives -= 1
-    reset_level(level_index)
+
+    # 1 second of invulnerability after losing a life
+    player_invuln_until = now + 1000
+
+    # Respawn at the current level's spawn without resetting boss/enemy progress
+    spx, spy = levels[level_index]["spawn"]
+    player.x = sx(spx)
+    player.y = sy(spy)
+    player_vel_y = 0.0
+    player_on_ground = False
+    can_double_jump = True
+
+    # Clear hazards/projectiles so you don't get instantly hit again
+    hazards.clear()
+    projectiles.clear()
 
 # ---------------------------------------------------------------------
 # DRAWING HELPERS
@@ -532,9 +862,8 @@ def draw_button(rect, label, active=False):
     screen.blit(txt, (rect.centerx - txt.get_width() // 2,
                       rect.centery - txt.get_height() // 2))
 
-def draw_menu():
-    """Cyber-Shadow style menu (keeps same buttons/rects)."""
-    # Background image if available, then dark overlay
+def draw_cyber_background(title=None, subtitle=None):
+    """Shared background/theme used by menu, question, win and lose screens."""
     if "background2" in globals() and background2 is not None:
         bg = pygame.transform.smoothscale(background2, (WIDTH, HEIGHT))
         screen.blit(bg, (0, 0))
@@ -550,18 +879,32 @@ def draw_menu():
         scan.fill((0, 0, 0, 18), rect=pygame.Rect(0, y, WIDTH, 2))
     screen.blit(scan, (0, 0))
 
-    # Title with glow
-    title_text = "WASK"
-    title_surf = FONT_XL.render(title_text, True, (255, 60, 60))
-    title_rect = title_surf.get_rect(center=(WIDTH // 2, int(HEIGHT * 0.20)))
-    for off in [(2, 0), (-2, 0), (0, 2), (0, -2)]:
-        glow = FONT_XL.render(title_text, True, (140, 20, 20))
-        screen.blit(glow, title_rect.move(off))
-    screen.blit(title_surf, title_rect)
+    if title:
+        title_surf = FONT_LG.render(title, True, (255, 60, 60))
+        title_rect = title_surf.get_rect(center=(WIDTH // 2, int(HEIGHT * 0.18)))
+        for off in [(2, 0), (-2, 0), (0, 2), (0, -2)]:
+            glow = FONT_LG.render(title, True, (140, 20, 20))
+            screen.blit(glow, title_rect.move(off))
+        screen.blit(title_surf, title_rect)
 
-    tagline = "CYBER OPERATIONS SIM"
-    tag_surf = FONT_SM.render(tagline, True, (200, 200, 210))
-    screen.blit(tag_surf, tag_surf.get_rect(center=(WIDTH // 2, title_rect.bottom + int(HEIGHT * 0.03))))
+        if subtitle:
+            sub = FONT_SM.render(subtitle, True, (200, 200, 210))
+            screen.blit(sub, sub.get_rect(center=(WIDTH // 2, title_rect.bottom + int(HEIGHT * 0.03))))
+
+def cyber_button(rect, text, hover=False):
+    fill = (28, 28, 36) if hover else (18, 18, 26)
+    edge = (255, 60, 60) if hover else (90, 90, 105)
+    pygame.draw.rect(screen, fill, rect, border_radius=12)
+    pygame.draw.rect(screen, edge, rect, 3, border_radius=12)
+    inner = rect.inflate(-10, -10)
+    pygame.draw.rect(screen, (10, 10, 14), inner, 2, border_radius=10)
+    txt = FONT_MD.render(text.upper(), True, (245, 245, 250))
+    screen.blit(txt, txt.get_rect(center=rect.center))
+
+def draw_menu():
+    """Cyber-Shadow style menu (keeps same buttons/rects)."""
+    # Background + title
+    draw_cyber_background(title="WASK", subtitle="CYBER OPERATIONS SIM")
 
     bw, bh = int(WIDTH * 0.30), int(HEIGHT * 0.075)
     gap = int(HEIGHT * 0.03)
@@ -573,16 +916,6 @@ def draw_menu():
 
     mx, my = pygame.mouse.get_pos()
 
-    def cyber_button(rect, text, hover):
-        fill = (28, 28, 36) if hover else (18, 18, 26)
-        edge = (255, 60, 60) if hover else (90, 90, 105)
-        pygame.draw.rect(screen, fill, rect, border_radius=12)
-        pygame.draw.rect(screen, edge, rect, 3, border_radius=12)
-        inner = rect.inflate(-10, -10)
-        pygame.draw.rect(screen, (10, 10, 14), inner, 2, border_radius=10)
-        txt = FONT_MD.render(text.upper(), True, (245, 245, 250))
-        screen.blit(txt, txt.get_rect(center=rect.center))
-
     cyber_button(play_rect,  "Play",        play_rect.collidepoint(mx, my))
     cyber_button(board_rect, "Leaderboard", board_rect.collidepoint(mx, my))
     cyber_button(quit_rect,  "Quit",        quit_rect.collidepoint(mx, my))
@@ -593,33 +926,43 @@ def draw_menu():
 
     return play_rect, board_rect, quit_rect
 def draw_name_entry():
-    screen.fill((25, 25, 25))
+    draw_cyber_background(title="WASK", subtitle="CYBER OPERATIONS SIM")
+
+    # Panel
+    panel = pygame.Rect(int(WIDTH * 0.12), int(HEIGHT * 0.22), int(WIDTH * 0.76), int(HEIGHT * 0.56))
+    pygame.draw.rect(screen, (18, 18, 26), panel, border_radius=18)
+    pygame.draw.rect(screen, (90, 90, 105), panel, 3, border_radius=18)
+
     title = FONT_LG.render("Enter your details", True, WHITE)
-    screen.blit(title, (WIDTH // 2 - title.get_width() // 2, int(HEIGHT * 0.2)))
+    screen.blit(title, title.get_rect(center=(WIDTH // 2, int(HEIGHT * 0.30))))
 
     name_label  = FONT_MD.render("Name (required):", True, WHITE)
     email_label = FONT_MD.render("Email (optional):", True, WHITE)
-    screen.blit(name_label,  (int(WIDTH * 0.18), int(HEIGHT * 0.30)))
-    screen.blit(email_label, (int(WIDTH * 0.18), int(HEIGHT * 0.45)))
+    screen.blit(name_label,  (int(WIDTH * 0.18), int(HEIGHT * 0.38)))
+    screen.blit(email_label, (int(WIDTH * 0.18), int(HEIGHT * 0.51)))
 
-    name_box  = pygame.Rect(int(WIDTH * 0.18), int(HEIGHT * 0.35), int(WIDTH * 0.64), int(HEIGHT * 0.07))
-    email_box = pygame.Rect(int(WIDTH * 0.18), int(HEIGHT * 0.50), int(WIDTH * 0.64), int(HEIGHT * 0.07))
-    pygame.draw.rect(screen, WHITE, name_box,  2)
-    pygame.draw.rect(screen, WHITE, email_box, 2)
+    name_box  = pygame.Rect(int(WIDTH * 0.18), int(HEIGHT * 0.43), int(WIDTH * 0.64), int(HEIGHT * 0.07))
+    email_box = pygame.Rect(int(WIDTH * 0.18), int(HEIGHT * 0.56), int(WIDTH * 0.64), int(HEIGHT * 0.07))
+    pygame.draw.rect(screen, (200, 200, 210), name_box,  2, border_radius=10)
+    pygame.draw.rect(screen, (200, 200, 210), email_box, 2, border_radius=10)
 
     ns = FONT_MD.render(name_text, True, WHITE)
     es = FONT_MD.render(email_text, True, WHITE)
     screen.blit(ns, (name_box.x + 10,  name_box.y + 8))
     screen.blit(es, (email_box.x + 10, email_box.y + 8))
 
-    indicator = FONT_SM.render("Typing: Name" if typing_name else "Typing: Email", True, WHITE)
-    screen.blit(indicator, (int(WIDTH * 0.18), int(HEIGHT * 0.60)))
+    indicator = FONT_SM.render("Typing: Name" if typing_name else "Typing: Email", True, (200, 200, 210))
+    screen.blit(indicator, (int(WIDTH * 0.18), int(HEIGHT * 0.66)))
 
-    hint = FONT_SM.render("TAB = switch | ENTER = start | ESC = back", True, WHITE)
-    screen.blit(hint, (WIDTH // 2 - hint.get_width() // 2, int(HEIGHT * 0.75)))
+    hint = FONT_SM.render("TAB = switch | ENTER = start | ESC = back", True, (170, 170, 180))
+    screen.blit(hint, hint.get_rect(center=(WIDTH // 2, int(HEIGHT * 0.73))))
 
 def draw_question():
-    screen.fill(GRAY)
+    draw_cyber_background(title="WASK", subtitle="CYBER OPERATIONS SIM")
+
+    panel = pygame.Rect(int(WIDTH * 0.10), int(HEIGHT * 0.22), int(WIDTH * 0.80), int(HEIGHT * 0.60))
+    pygame.draw.rect(screen, (18, 18, 26), panel, border_radius=18)
+    pygame.draw.rect(screen, (90, 90, 105), panel, 3, border_radius=18)
     words = q_text.split()
     lines = []
     cur = ""
@@ -633,34 +976,39 @@ def draw_question():
     if cur:
         lines.append(cur)
 
-    y = int(HEIGHT * 0.2)
+    y = int(HEIGHT * 0.30)
     for line in lines:
         txt = FONT_MD.render(line, True, WHITE)
         screen.blit(txt, (WIDTH // 2 - txt.get_width() // 2, y))
         y += txt.get_height() + 5
 
     bw, bh = int(WIDTH * 0.4), int(HEIGHT * 0.08)
-    start_y = int(HEIGHT * 0.45)
+    start_y = int(HEIGHT * 0.55)
     mx, my = pygame.mouse.get_pos()
     for i, r in enumerate(q_buttons):
         r.width, r.height = bw, bh
         r.x = WIDTH // 2 - bw // 2
         r.y = start_y + i * (bh + int(HEIGHT * 0.02))
-        draw_button(r, q_answers[i], r.collidepoint(mx, my))
+        cyber_button(r, q_answers[i], r.collidepoint(mx, my))
 
 def draw_center_panel(title, buttons):
-    screen.fill(GRAY)
-    t = FONT_LG.render(title, True, WHITE)
-    screen.blit(t, (WIDTH // 2 - t.get_width() // 2, int(HEIGHT * 0.26)))
+    draw_cyber_background(title="WASK", subtitle="CYBER OPERATIONS SIM")
+
+    panel = pygame.Rect(int(WIDTH * 0.22), int(HEIGHT * 0.24), int(WIDTH * 0.56), int(HEIGHT * 0.54))
+    pygame.draw.rect(screen, (18, 18, 26), panel, border_radius=18)
+    pygame.draw.rect(screen, (90, 90, 105), panel, 3, border_radius=18)
+
+    t = FONT_LG.render(title, True, (255, 60, 60))
+    screen.blit(t, t.get_rect(center=(WIDTH // 2, int(HEIGHT * 0.33))))
 
     bw, bh = int(WIDTH * 0.22), int(HEIGHT * 0.07)
     mx, my = pygame.mouse.get_pos()
-    sy = int(HEIGHT * 0.45)
+    sy = int(HEIGHT * 0.48)
     for i, (label, r) in enumerate(buttons):
         r.width, r.height = bw, bh
         r.x = WIDTH // 2 - bw // 2
         r.y = sy + i * (bh + int(HEIGHT * 0.02))
-        draw_button(r, label, r.collidepoint(mx, my))
+        cyber_button(r, label, r.collidepoint(mx, my))
 
 def draw_gameplay():
     # Background
@@ -702,7 +1050,7 @@ def draw_gameplay():
     # Boss + HP bar
     if boss:
         pygame.draw.rect(screen, BOSS_COLOR, boss)
-        base_hp = LEVELS_BASE[2]["boss"]["hp"]
+        base_hp = max(1, boss_max_hp)
         bw = int(min(500 * Sx, WIDTH * 0.4))
         x0 = WIDTH // 2 - bw // 2
         pygame.draw.rect(screen, RED, (x0, 10, bw, ss(18)))
@@ -739,6 +1087,7 @@ reset_level(0)
 # MAIN LOOP
 # ---------------------------------------------------------------------
 running = True
+prev_jump_pressed = False
 while running:
     dt = clock.tick(60)
     clicked = False
@@ -760,12 +1109,16 @@ while running:
 
     keys = pygame.key.get_pressed()
 
+    # Only edge-detect jump while playing
+    if game_state != "play":
+        prev_jump_pressed = False
+
     # Controller button states (D-pad is buttons on this pad)
-    joy_left = joy_right = joy_up = joy_attack = joy_start = joy_select = False
+    joy_left = joy_right = joy_jump = joy_attack = joy_start = joy_select = False
     if joy is not None and joy.get_init():
         joy_left = bool(joy.get_button(DPAD_LEFT_BTN))
         joy_right = bool(joy.get_button(DPAD_RIGHT_BTN))
-        joy_up = bool(joy.get_button(DPAD_UP_BTN))
+        joy_jump = bool(joy.get_button(BTN_B))
         joy_attack = bool(joy.get_button(BTN_A))
         joy_start = bool(joy.get_button(BTN_START))
         joy_select = bool(joy.get_button(BTN_SELECT))
@@ -845,9 +1198,9 @@ while running:
         if player.right > RIGHT_WALL.left:
             player.right = RIGHT_WALL.left
 
-        # Jumping (single + double jump) (keyboard + controller)
-        jump_pressed = keys[pygame.K_UP] or joy_up
-        if jump_pressed:
+        # Jumping (single + double jump) (keyboard UP or controller B)
+        jump_pressed = keys[pygame.K_UP] or joy_jump
+        if jump_pressed and not prev_jump_pressed:
             if player_on_ground:
                 player_vel_y = JUMP_FORCE
                 player_on_ground = False
@@ -855,6 +1208,7 @@ while running:
             elif can_double_jump:
                 player_vel_y = JUMP_FORCE
                 can_double_jump = False
+        prev_jump_pressed = jump_pressed
 
         # Shooting (Space / Controller A)
         now = pygame.time.get_ticks()
@@ -964,8 +1318,26 @@ while running:
                 start_question(q, opts, cidx, after_portal)
         else:
             # Boss level
-            update_boss()
-            update_hazards()
+            if boss_defeated:
+                # After each boss: portal -> question -> next boss
+                if portal and player.colliderect(portal):
+                    q, opts, cidx = random.choice(mc_questions)
+
+                    def after_boss_portal(correct):
+                        global level_index, game_state
+                        if not correct:
+                            return
+                        # Advance to next boss/level, or win after the last boss
+                        if level_index + 1 < len(levels):
+                            level_index += 1
+                            reset_level(level_index)
+                        else:
+                            game_state = "win"
+
+                    start_question(q, opts, cidx, after_boss_portal)
+            else:
+                update_boss()
+                update_hazards()
 
         # Lose condition
         if lives <= 0:
