@@ -12,9 +12,9 @@ pygame.init()
 pygame.joystick.init()
 
 # -------------------------------
-# RENDER LEADERBOARD (PUBLIC)
+# LEADERBOARD API (Render server backed by Neon Postgres)
 # -------------------------------
-BASE_URL = "https://iot-project-87on.onrender.com"
+BASE_URL = "https://iot-project-2-5afi.onrender.com"
 API_URL = BASE_URL + "/api/leaderboard"
 SUBMIT_URL = BASE_URL + "/submit_result"
 LEADERBOARD_WEB_URL = BASE_URL + "/"
@@ -384,10 +384,23 @@ def submit_result_to_server(name, email, time_s, outcome):
         "time_s": float(time_s),
         "outcome": outcome,
     }
-    try:
-        requests.post(url, json=payload, timeout=1.0)
-    except Exception:
-        pass
+
+    # Debug: shows in VS Code terminal so you know if it actually posted
+    print("SUBMIT ->", url)
+    print("PAYLOAD ->", payload)
+
+    # Render free-tier services can sleep; first request may be slow.
+    # Use longer timeouts + retry and only treat 2xx as success.
+    for t in (6.0, 10.0):
+        try:
+            r = requests.post(url, json=payload, timeout=t)
+            print("SUBMIT HTTP ->", getattr(r, "status_code", None), (r.text[:200] if hasattr(r, "text") else ""))
+            if 200 <= getattr(r, "status_code", 0) < 300:
+                return True
+        except Exception as e:
+            print("SUBMIT FAILED ->", repr(e))
+            continue
+    return False
 
 # ---------------------------------------------------------------------
 # RESET LEVEL
@@ -843,8 +856,7 @@ def damage_player():
 
     # Respawn at the current level's spawn without resetting boss/enemy progress
     spx, spy = levels[level_index]["spawn"]
-    player.x = sx(spx)
-    player.y = sy(spy)
+    player.topleft = (spx, spy)
     player_vel_y = 0.0
     player_on_ground = False
     can_double_jump = True
@@ -1139,7 +1151,8 @@ while running:
                 email_text = ""
                 typing_name = True
             elif board_r.collidepoint(click_pos):
-                webbrowser.open(LEADERBOARD_WEB_URL)
+                # Cache-bust so the browser doesn't show an old leaderboard.
+                webbrowser.open(f"{LEADERBOARD_WEB_URL}?t={int(time.time())}")
 
             elif quit_r.collidepoint(click_pos):
                 running = False
@@ -1199,7 +1212,7 @@ while running:
             player.right = RIGHT_WALL.left
 
         # Jumping (single + double jump) (keyboard UP or controller B)
-        jump_pressed = keys[pygame.K_UP] or joy_jump
+        jump_pressed = keys[pygame.K_w] or joy_jump
         if jump_pressed and not prev_jump_pressed:
             if player_on_ground:
                 player_vel_y = JUMP_FORCE
@@ -1394,6 +1407,7 @@ while running:
 
         buttons = [
             ("Restart", pygame.Rect(0, 0, 0, 0)),
+            ("Leaderboard", pygame.Rect(0, 0, 0, 0)),
             ("Quit", pygame.Rect(0, 0, 0, 0)),
         ]
         draw_center_panel("YOU WIN", buttons)
@@ -1403,19 +1417,25 @@ while running:
             screen.blit(t, (WIDTH // 2 - t.get_width() // 2, int(HEIGHT * 0.36)))
 
         if clicked and click_pos:
-            r0, r1 = buttons[0][1], buttons[1][1]
+            r0, r1, r2 = buttons[0][1], buttons[1][1], buttons[2][1]
             if r0.collidepoint(click_pos):
                 game_state = "name_entry"
                 name_text = ""
                 email_text = ""
                 typing_name = True
             elif r1.collidepoint(click_pos):
+                webbrowser.open(f"{LEADERBOARD_WEB_URL}?t={int(time.time())}")
+            elif r2.collidepoint(click_pos):
                 running = False
 
     pygame.display.flip()
 
 pygame.quit()
 sys.exit()
+
+
+
+
 
 
 
