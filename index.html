@@ -1,0 +1,534 @@
+<!doctype html>
+<html lang="en" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cheltenham Science Festival 2026 - Escape the WASK</title>
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;500;600;700;800;900&amp;family=Rajdhani:wght@300;400;500;600;700&amp;family=Share+Tech+Mono&amp;display=swap" rel="stylesheet">
+  <style>
+        :root {
+            --bg-dark: #0a0a0f;
+            --bg-card: #12121a;
+            --accent-cyan: #00f5ff;
+            --accent-magenta: #ff00ff;
+            --accent-green: #00ff88;
+            --text-primary: #e8e8e8;
+            --text-secondary: #8888aa;
+        }
+        
+        body {
+            font-family: 'Rajdhani', sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+        }
+        
+        .title-font {
+            font-family: 'Orbitron', sans-serif;
+        }
+        
+        .mono-font {
+            font-family: 'Share Tech Mono', monospace;
+        }
+        
+        .cyber-gradient {
+            background: linear-gradient(135deg, var(--accent-cyan), var(--accent-magenta));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+        
+        .glow-cyan {
+            text-shadow: 0 0 10px var(--accent-cyan), 0 0 20px var(--accent-cyan), 0 0 40px var(--accent-cyan);
+        }
+        
+        .glow-magenta {
+            text-shadow: 0 0 10px var(--accent-magenta), 0 0 20px var(--accent-magenta);
+        }
+        
+        .card {
+            background: var(--bg-card);
+            border: 1px solid rgba(0, 245, 255, 0.2);
+            border-radius: 8px;
+            position: relative;
+            overflow: hidden;
+        }
+        
+        .card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent-cyan), var(--accent-magenta), var(--accent-green));
+        }
+        
+        .scanline {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            background: repeating-linear-gradient(
+                0deg,
+                transparent,
+                transparent 2px,
+                rgba(0, 0, 0, 0.1) 2px,
+                rgba(0, 0, 0, 0.1) 4px
+            );
+            z-index: 1000;
+            opacity: 0.3;
+        }
+        
+        .grid-bg {
+            background-image: 
+                linear-gradient(rgba(0, 245, 255, 0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(0, 245, 255, 0.03) 1px, transparent 1px);
+            background-size: 50px 50px;
+        }
+        
+        .section-title {
+            font-family: 'Orbitron', sans-serif;
+            color: var(--accent-cyan);
+            border-bottom: 2px solid var(--accent-cyan);
+            padding-bottom: 8px;
+            margin-bottom: 16px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        
+        .bullet-item {
+            position: relative;
+            padding-left: 24px;
+            margin-bottom: 8px;
+        }
+        
+        .bullet-item::before {
+            content: '▸';
+            position: absolute;
+            left: 0;
+            color: var(--accent-magenta);
+            font-size: 14px;
+        }
+        
+        .highlight-box {
+            background: linear-gradient(135deg, rgba(0, 245, 255, 0.1), rgba(255, 0, 255, 0.1));
+            border-left: 4px solid var(--accent-green);
+            padding: 16px;
+            margin: 16px 0;
+        }
+        
+        .drone-animation {
+            animation: float 3s ease-in-out infinite;
+        }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        
+        @keyframes pulse-glow {
+            0%, 100% { box-shadow: 0 0 20px rgba(0, 245, 255, 0.3); }
+            50% { box-shadow: 0 0 40px rgba(0, 245, 255, 0.6), 0 0 60px rgba(255, 0, 255, 0.3); }
+        }
+        
+        .pulse-border {
+            animation: pulse-glow 2s ease-in-out infinite;
+        }
+        
+        .tag {
+            display: inline-block;
+            padding: 4px 12px;
+            background: rgba(0, 245, 255, 0.15);
+            border: 1px solid var(--accent-cyan);
+            border-radius: 4px;
+            font-size: 12px;
+            margin: 4px;
+            font-family: 'Share Tech Mono', monospace;
+        }
+        
+        .wow-badge {
+            background: linear-gradient(135deg, var(--accent-magenta), var(--accent-cyan));
+            color: #000;
+            font-weight: 700;
+            padding: 8px 16px;
+            border-radius: 4px;
+            display: inline-block;
+            animation: pulse-glow 1.5s ease-in-out infinite;
+        }
+
+        .flow-arrow {
+            color: var(--accent-green);
+            font-size: 20px;
+            margin: 8px 0;
+        }
+    </style>
+  <style>body { box-sizing: border-box; }</style>
+  <script src="/_sdk/data_sdk.js" type="text/javascript"></script>
+ </head>
+ <body class="h-full">
+  <div class="scanline"></div>
+  <div class="min-h-full grid-bg overflow-auto">
+   <!-- Header Section -->
+   <header class="py-8 px-4 text-center relative">
+    <div class="absolute top-4 left-4 mono-font text-xs text-cyan-400 opacity-60">
+     SYSTEM://ACTIVE
+    </div>
+    <div class="absolute top-4 right-4 mono-font text-xs text-magenta-400 opacity-60">
+     v2.0.26
+    </div>
+    <p id="festival-title" class="mono-font text-cyan-400 text-sm tracking-widest mb-2">CHELTENHAM SCIENCE FESTIVAL 2026</p>
+    <h1 id="game-title" class="title-font text-4xl md:text-6xl font-black cyber-gradient mb-4">ESCAPE THE WASK</h1>
+    <p id="tagline" class="title-font text-lg md:text-xl text-gray-400 tracking-wide">11 LEVELS • 5 BOSSES • CYBERSECURITY</p><!-- Decorative elements -->
+    <div class="flex justify-center gap-2 mt-6 flex-wrap justify-center">
+     <span class="tag">PYTHON</span> <span class="tag">PYGAME</span> <span class="tag">NES CONTROLLER</span> <span class="tag">NEON POSTGRES</span> <span class="tag">RENDER</span>
+    </div>
+   </header><!-- Main Content -->
+   <main class="max-w-7xl mx-auto px-4 pb-12">
+    <!-- Project Overview -->
+    <section class="card p-6 mb-6 pulse-border">
+     <h2 class="section-title text-xl">⬡ About The Game</h2>
+     <p class="text-lg leading-relaxed text-gray-300"><span class="text-cyan-400 font-semibold">ESCAPE THE WASK</span> is an immersive cyber-security awareness game that challenges players to battle through <span class="text-magenta-400 font-semibold">11 levels</span> and defeat <span class="text-green-400 font-semibold">5 epic bosses</span>—the legendary team members plus the ultimate final boss: <span class="text-yellow-400 font-bold">THE WASK</span> (the fusion of all their powers). Collect power-ups to unlock advanced cybersecurity challenges. Every wrong move counts in this retro-inspired battle arena.</p>
+    </section><!-- Two Column Layout -->
+    <div class="grid md:grid-cols-2 gap-6 mb-6">
+     <!-- Key Components -->
+     <section class="card p-6">
+      <h2 class="section-title text-lg">⬡ Key Components</h2>
+      <div class="space-y-2">
+       <p class="bullet-item">Python + Pygame retro game engine</p>
+       <p class="bullet-item">11 immersive levels with cybersecurity challenges</p>
+       <p class="bullet-item">5 epic boss battles</p>
+       <p class="bullet-item">NES Controller Bluetooth connectivity</p>
+       <p class="bullet-item">Sphero Bolt motion feedback</p>
+       <p class="bullet-item">Neon Postgres persistent database</p>
+       <p class="bullet-item">Lenovo Legion laptop as game host</p>
+       <p class="bullet-item">Render cloud deployment</p>
+       <p class="bullet-item">AI-generated cybersecurity questions</p>
+      </div>
+     </section><!-- The Five Bosses -->
+     <section class="card p-6">
+      <h2 class="section-title text-lg">⬡ The Five Bosses</h2>
+      <div class="space-y-3 text-sm">
+       <div class="p-2 border-l-4 border-cyan-400 bg-cyan-900/10">
+        <p class="font-bold text-cyan-400">🎯 WILNID WINCLAIR</p>
+        <p class="text-gray-400">Project Manager • Song Composer • Sprite Animation</p>
+       </div>
+       <div class="p-2 border-l-4 border-yellow-400 bg-yellow-900/10">
+        <p class="font-bold text-yellow-400">🎨 ALFRED</p>
+        <p class="text-gray-400">Lead Animator • Sprite Design &amp; Animation Master</p>
+       </div>
+       <div class="p-2 border-l-4 border-purple-400 bg-purple-900/10">
+        <p class="font-bold text-purple-400">📊 SAMURAI</p>
+        <p class="text-gray-400">Documentation Expert • Security Research &amp; Certification</p>
+       </div>
+       <div class="p-2 border-l-4 border-green-400 bg-green-900/10">
+        <p class="font-bold text-green-400">💻 KRISHNA</p>
+        <p class="text-gray-400">Lead Programmer • Leaderboard &amp; GitHub Integration</p>
+       </div>
+       <div class="p-2 border-l-4 border-red-400 bg-red-900/10">
+        <p class="font-bold text-red-400">⚡ THE WASK</p>
+        <p class="text-gray-400">Ultimate fusion of all team powers combined</p>
+       </div>
+      </div>
+     </section>
+    </div><!-- How The System Works - Full Width -->
+    <section class="card p-8 mb-6 relative overflow-visible">
+     <h2 class="section-title text-2xl mb-8">⬡ How The System Works</h2><!-- Main Flow Diagram -->
+     <div class="space-y-6"><!-- Flow Row 1: Input Sources -->
+      <div class="grid md:grid-cols-2 gap-4">
+       <div class="p-5 bg-gradient-to-br from-cyan-900/30 to-transparent rounded-lg border-2 border-cyan-400/50">
+        <p class="text-3xl mb-3 text-center">🕹️</p>
+        <p class="mono-font text-cyan-400 font-bold text-sm mb-2 text-center">NES CONTROLLER</p>
+        <div class="space-y-1 text-xs">
+         <p class="bullet-item">Bluetooth connectivity</p>
+         <p class="bullet-item">D-Pad directional input</p>
+         <p class="bullet-item">Action button controls</p>
+         <p class="bullet-item">Real-time data streaming</p>
+        </div>
+       </div>
+       <div class="p-5 bg-gradient-to-br from-magenta-900/30 to-transparent rounded-lg border-2 border-magenta-400/50">
+        <p class="text-3xl mb-3 text-center">🟢</p>
+        <p class="mono-font text-magenta-400 font-bold text-sm mb-2 text-center">SPHERO BOLT</p>
+        <div class="space-y-1 text-xs">
+         <p class="bullet-item">Gyroscope &amp; accelerometer</p>
+         <p class="bullet-item">Motion tracking feedback</p>
+         <p class="bullet-item">LED visual effects</p>
+         <p class="bullet-item">Real-time sensor data</p>
+        </div>
+       </div>
+      </div><!-- Flow Arrow Down -->
+      <div class="flex justify-center text-2xl text-green-400 font-bold">
+       ↓ ↓
+      </div><!-- Game Engine Core -->
+      <div class="p-6 bg-gradient-to-br from-purple-900/40 to-magenta-900/20 rounded-lg border-2 border-purple-400/60 text-center">
+       <p class="text-3xl mb-3">🎮</p>
+       <p class="mono-font text-purple-400 font-bold text-lg mb-4">GAME ENGINE</p>
+       <div class="grid md:grid-cols-2 gap-4 text-sm">
+        <div>
+         <p class="text-cyan-400 font-semibold mb-1">Lenovo Legion Laptop</p>
+         <p class="text-gray-400">Python + Pygame</p>
+        </div>
+        <div>
+         <p class="text-magenta-400 font-semibold mb-1">Core Systems</p>
+         <p class="text-gray-400">Boss AI • Combat Physics • Collision Detection</p>
+        </div>
+       </div>
+       <div class="mt-3 p-3 bg-black/40 rounded border border-purple-400/30 text-xs">
+        <p class="text-green-400 font-semibold mb-1">🤖 AI-POWERED QUESTIONS</p>
+        <p class="text-gray-300">Dynamic cybersecurity challenges generated in real-time</p>
+       </div>
+      </div><!-- Flow Arrow Down -->
+      <div class="flex justify-center text-2xl text-green-400 font-bold">
+       ↓ ↓
+      </div><!-- Output Systems -->
+      <div class="grid md:grid-cols-2 gap-4">
+       <div class="p-5 bg-gradient-to-br from-yellow-900/30 to-transparent rounded-lg border-2 border-yellow-400/50">
+        <p class="text-3xl mb-3 text-center">💾</p>
+        <p class="mono-font text-yellow-400 font-bold text-sm mb-2 text-center">NEON POSTGRES</p>
+        <div class="space-y-1 text-xs">
+         <p class="bullet-item">Persistent database storage</p>
+         <p class="bullet-item">Secure data encryption</p>
+         <p class="bullet-item">Real-time score sync</p>
+         <p class="bullet-item">Never loses player data</p>
+        </div>
+       </div>
+       <div class="p-5 bg-gradient-to-br from-green-900/30 to-transparent rounded-lg border-2 border-green-400/50">
+        <p class="text-3xl mb-3 text-center">☁️</p>
+        <p class="mono-font text-green-400 font-bold text-sm mb-2 text-center">RENDER CLOUD</p>
+        <div class="space-y-1 text-xs">
+         <p class="bullet-item">Cloud deployment hosting</p>
+         <p class="bullet-item">Leaderboard server</p>
+         <p class="bullet-item">Auto-deployment &amp; updates</p>
+         <p class="bullet-item">Global accessibility</p>
+        </div>
+       </div>
+      </div>
+     </div><!-- Info Box: Why Neon Postgres -->
+     <div class="mt-8 p-5 bg-gradient-to-r from-cyan-900/30 via-magenta-900/20 to-green-900/30 rounded-lg border-l-4 border-cyan-400">
+      <div class="flex items-start gap-3"><span class="text-2xl">🔐</span>
+       <div>
+        <p class="mono-font text-cyan-400 font-bold text-sm mb-2">WHY NEON POSTGRES?</p>
+        <p class="text-xs text-gray-300 leading-relaxed">Neon provides a persistent, reliable online database for the leaderboard. With Render's free tier, SQLite files can be wiped when the service sleeps or restarts—causing scores to disappear. Neon keeps data safely stored with a secure connection string, so the leaderboard updates instantly for every player and never loses scores.</p>
+       </div>
+      </div>
+     </div><!-- Architecture Summary -->
+     <div class="mt-8 grid md:grid-cols-4 gap-3 text-center text-xs">
+      <div class="p-3 bg-cyan-900/20 rounded border border-cyan-400/40">
+       <p class="text-xl mb-2">🕹️</p>
+       <p class="text-cyan-400 font-semibold">INPUT</p>
+       <p class="text-gray-400">NES + Sphero</p>
+      </div>
+      <div class="p-3 bg-purple-900/20 rounded border border-purple-400/40">
+       <p class="text-xl mb-2">⚙️</p>
+       <p class="text-purple-400 font-semibold">PROCESS</p>
+       <p class="text-gray-400">Python + AI</p>
+      </div>
+      <div class="p-3 bg-yellow-900/20 rounded border border-yellow-400/40">
+       <p class="text-xl mb-2">💾</p>
+       <p class="text-yellow-400 font-semibold">STORAGE</p>
+       <p class="text-gray-400">Neon DB</p>
+      </div>
+      <div class="p-3 bg-green-900/20 rounded border border-green-400/40">
+       <p class="text-xl mb-2">☁️</p>
+       <p class="text-green-400 font-semibold">CLOUD</p>
+       <p class="text-gray-400">Render Deploy</p>
+      </div>
+     </div>
+    </section><!-- Three Column Section -->
+    <div class="grid md:grid-cols-3 gap-6 mb-6">
+     <!-- Sensing -->
+     <section class="card p-6">
+      <h2 class="section-title text-base">⬡ Sensing &amp; Input</h2>
+      <div class="space-y-2 text-sm">
+       <p class="bullet-item">NES Controller Bluetooth connectivity</p>
+       <p class="bullet-item">D-Pad directional input</p>
+       <p class="bullet-item">Action &amp; select buttons</p>
+       <p class="bullet-item">Start &amp; pause controls</p>
+       <p class="bullet-item">Sphero Bolt feedback system</p>
+       <p class="bullet-item">Real-time sensor integration</p>
+       <p class="bullet-item">Retro-authentic controls</p>
+      </div>
+      <div class="mt-4 p-3 bg-cyan-900/20 rounded text-xs mono-font">
+       Classic controls • Zero lag • Authentic experience
+      </div>
+     </section><!-- Professional Practice -->
+     <section class="card p-6">
+      <h2 class="section-title text-base">⬡ Professional Practice</h2>
+      <div class="space-y-2 text-sm">
+       <p class="bullet-item">Hybrid development methodology</p>
+       <p class="bullet-item">Agile with daily stand-ups &amp; sprints</p>
+       <p class="bullet-item">Microsoft Teams collaboration</p>
+       <p class="bullet-item">Gantt charts in MS Project</p>
+       <p class="bullet-item">Risk management &amp; documentation</p>
+       <p class="bullet-item">Full SDLC implementation</p>
+       <p class="bullet-item">Cross-department collaboration</p>
+      </div>
+      <div class="mt-4 p-3 bg-magenta-900/20 rounded text-xs mono-font">
+       Design → Deploy → Evaluate
+      </div>
+     </section><!-- Showcase -->
+     <section class="card p-6">
+      <h2 class="section-title text-base">⬡ Showcase Elements</h2>
+      <div class="space-y-2 text-sm">
+       <p class="bullet-item">🎮 Live game demonstration</p>
+       <p class="bullet-item">🕹️ NES Controller in action</p>
+       <p class="bullet-item">🟢 Sphero Bolt feedback</p>
+       <p class="bullet-item">🖥️ Lenovo Legion display</p>
+       <p class="bullet-item">🔐 Cybersecurity challenges</p>
+       <p class="bullet-item">⭐ Boss battle sequences</p>
+       <p class="bullet-item">🌐 Portfolio websites</p>
+      </div>
+     </section>
+    </div><!-- What Makes This Special -->
+    <section class="card p-6 mb-6" style="border-color: rgba(0, 255, 136, 0.4);">
+     <h2 class="section-title text-xl" style="color: #00ff88; border-color: #00ff88;">⬡ What Makes This Project Special</h2>
+     <p class="text-lg mb-4 text-gray-300">This is an <span class="text-green-400 font-bold">unusually advanced Level 3 project</span>. Students are demonstrating skills normally seen at <span class="text-yellow-400 font-bold">Levels 4–5</span>:</p>
+     <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-center">
+      <div class="p-3 bg-gradient-to-br from-cyan-900/30 to-transparent rounded">
+       <p class="text-2xl mb-2">🐍</p>
+       <p class="text-sm font-semibold text-cyan-400">Python + Pygame</p>
+      </div>
+      <div class="p-3 bg-gradient-to-br from-magenta-900/30 to-transparent rounded">
+       <p class="text-2xl mb-2">🕹️</p>
+       <p class="text-sm font-semibold text-magenta-400">NES Controller</p>
+      </div>
+      <div class="p-3 bg-gradient-to-br from-green-900/30 to-transparent rounded">
+       <p class="text-2xl mb-2">🟢</p>
+       <p class="text-sm font-semibold text-green-400">Sphero Bolt IoT</p>
+      </div>
+      <div class="p-3 bg-gradient-to-br from-yellow-900/30 to-transparent rounded">
+       <p class="text-2xl mb-2">🎯</p>
+       <p class="text-sm font-semibold text-yellow-400">Boss AI Systems</p>
+      </div>
+      <div class="p-3 bg-gradient-to-br from-red-900/30 to-transparent rounded">
+       <p class="text-2xl mb-2">🤖</p>
+       <p class="text-sm font-semibold text-red-400">AI Question Gen</p>
+      </div>
+      <div class="p-3 bg-gradient-to-br from-purple-900/30 to-transparent rounded">
+       <p class="text-2xl mb-2">💾</p>
+       <p class="text-sm font-semibold text-purple-400">Neon Postgres</p>
+      </div>
+      <div class="p-3 bg-gradient-to-br from-blue-900/30 to-transparent rounded">
+       <p class="text-2xl mb-2">🔄</p>
+       <p class="text-sm font-semibold text-blue-400">Hybrid Methodology</p>
+      </div>
+      <div class="p-3 bg-gradient-to-br from-orange-900/30 to-transparent rounded">
+       <p class="text-2xl mb-2">📋</p>
+       <p class="text-sm font-semibold text-orange-400">Full SDLC</p>
+      </div>
+     </div>
+     <p class="text-center mt-6 mono-font text-xs text-gray-500">Computing • Engineering • IoT Hardware • AI Integration</p>
+    </section><!-- Footer -->
+    <footer class="text-center py-8 border-t border-gray-800">
+     <p class="mono-font text-cyan-400 text-lg tracking-widest mb-2">ASK IF NOT SURE!</p>
+     <p class="text-gray-500 text-sm">Cheltenham Science Festival 2026 • ESCAPE THE WASK • Level 3 Computing Project</p>
+     <div class="flex justify-center gap-4 mt-4 flex-wrap justify-center">
+      <span class="tag">🎮 LIVE DEMO</span> <span class="tag">🕹️ NES CONTROLLER</span> <span class="tag">🔐 CYBERSECURITY</span>
+     </div>
+    </footer>
+   </main>
+  </div>
+  <script>
+        const defaultConfig = {
+            game_title: 'ESCAPE THE WASK',
+            festival_title: 'CHELTENHAM SCIENCE FESTIVAL 2026',
+            tagline: '11 LEVELS • 5 BOSSES • CYBERSECURITY',
+            background_color: '#0a0a0f',
+            card_color: '#12121a',
+            text_color: '#e8e8e8',
+            accent_color: '#00f5ff',
+            secondary_accent: '#ff00ff'
+        };
+
+        async function onConfigChange(config) {
+            const gameTitle = document.getElementById('game-title');
+            const festivalTitle = document.getElementById('festival-title');
+            const tagline = document.getElementById('tagline');
+            
+            if (gameTitle) {
+                gameTitle.textContent = config.game_title || defaultConfig.game_title;
+            }
+            if (festivalTitle) {
+                festivalTitle.textContent = config.festival_title || defaultConfig.festival_title;
+            }
+            if (tagline) {
+                tagline.textContent = config.tagline || defaultConfig.tagline;
+            }
+            
+            document.body.style.background = config.background_color || defaultConfig.background_color;
+            document.querySelectorAll('.card').forEach(card => {
+                card.style.background = config.card_color || defaultConfig.card_color;
+            });
+        }
+
+        function mapToCapabilities(config) {
+            return {
+                recolorables: [
+                    {
+                        get: () => config.background_color || defaultConfig.background_color,
+                        set: (value) => {
+                            config.background_color = value;
+                            window.elementSdk.setConfig({ background_color: value });
+                        }
+                    },
+                    {
+                        get: () => config.card_color || defaultConfig.card_color,
+                        set: (value) => {
+                            config.card_color = value;
+                            window.elementSdk.setConfig({ card_color: value });
+                        }
+                    },
+                    {
+                        get: () => config.text_color || defaultConfig.text_color,
+                        set: (value) => {
+                            config.text_color = value;
+                            window.elementSdk.setConfig({ text_color: value });
+                        }
+                    },
+                    {
+                        get: () => config.accent_color || defaultConfig.accent_color,
+                        set: (value) => {
+                            config.accent_color = value;
+                            window.elementSdk.setConfig({ accent_color: value });
+                        }
+                    },
+                    {
+                        get: () => config.secondary_accent || defaultConfig.secondary_accent,
+                        set: (value) => {
+                            config.secondary_accent = value;
+                            window.elementSdk.setConfig({ secondary_accent: value });
+                        }
+                    }
+                ],
+                borderables: [],
+                fontEditable: undefined,
+                fontSizeable: undefined
+            };
+        }
+
+        function mapToEditPanelValues(config) {
+            return new Map([
+                ['game_title', config.game_title || defaultConfig.game_title],
+                ['festival_title', config.festival_title || defaultConfig.festival_title],
+                ['tagline', config.tagline || defaultConfig.tagline]
+            ]);
+        }
+
+        if (window.elementSdk) {
+            window.elementSdk.init({
+                defaultConfig,
+                onConfigChange,
+                mapToCapabilities,
+                mapToEditPanelValues
+            });
+        } else {
+            onConfigChange(defaultConfig);
+        }
+    </script>
+ <script>(function(){function c(){var b=a.contentDocument||a.contentWindow.document;if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'9d924cb9a02f88a7',t:'MTc3Mjk3NzcyOS4wMDAwMDA='};var a=document.createElement('script');a.nonce='';a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
