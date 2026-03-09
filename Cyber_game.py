@@ -227,11 +227,11 @@ LEVELS_BASE = [
         #   shot -> wait -> shot -> wait -> shot
         #   (small punish window) -> dash to opposite side
         #   (cooldown) -> repeat
-        "shot_gap_ms": 850,            # time between each single shot (more reaction time)
-        "post_shots_pause_ms": 1300,   # time after 3rd shot before the dash (player can punish)
-        "cycle_cooldown_ms": 2400,     # time after dash before starting again
-        "proj_speed": 10,
-        "dash_speed": 14,
+        "shot_gap_ms": 1400,            # time between each single shot (more reaction time)
+        "post_shots_pause_ms": 2200,   # time after 3rd shot before the dash (player can punish)
+        "cycle_cooldown_ms": 3200,     # time after dash before starting again
+        "proj_speed": 8,
+        "dash_speed": 12,
     },
 },
 {   # LEVEL 5 – BOSS 5 (3 ground slashes + 1s gaps + swap sides)
@@ -241,6 +241,16 @@ LEVELS_BASE = [
         "collectibles": [],
         "boss": {
             "type": "boss5",
+            "touch_damage": 0,
+
+            "sword_speed": 10,         # boomerang sword speed (scaled)
+            "sword_w": 18,             # sword hitbox width (scaled)
+            "sword_h": 10,             # sword hitbox height (scaled)
+            "punish_ms": 5000,         # boss rests on ground so player can attack
+            "tele_mark_ms": 2000,      # red mark duration before teleport
+            "tele_w": 60,              # red mark width (scaled)
+            "tele_h": 26,              # red mark height (scaled)
+            "windup_ms": 600,          # small windup before throwing sword
             "hp": 16,
             "touch_damage": True,
             "slash_count": 3,
@@ -303,7 +313,7 @@ def build_levels():
         if L["boss"]:
             cfg = dict(L["boss"])
             # Only scale keys that exist (Boss 4/5/6 use different keys)
-            for k in ("jump_power", "gravity", "speed_x", "proj_speed", "lane_speed", "slash_speed", "dash_speed", "needle_speed"):
+            for k in ("jump_power", "gravity", "speed_x", "proj_speed", "lane_speed", "slash_speed", "dash_speed", "needle_speed", "slash_width", "slash_height", "sword_speed", "sword_w", "sword_h", "tele_w", "tele_h"):
                 if k in cfg:
                     cfg[k] *= S
             lvl["boss_cfg"] = cfg
@@ -551,8 +561,16 @@ def update_hazards():
             r.y += int(hz.get("vy", 0))
             hz["life"] -= 1
 
-        # collision
-        if player.colliderect(r):
+        elif kind == "sword":
+            r.x += int(hz.get("vx", 0))
+            r.y += int(hz.get("vy", 0))
+            hz["life"] -= 1
+
+        elif kind == "tele_mark":
+            hz["life"] -= 1
+
+        # collision (teleport markers are safe)
+        if kind != "tele_mark" and player.colliderect(r):
             damage_player()
 
         # keep on screen and alive
@@ -746,45 +764,84 @@ def update_boss():
                 boss_aux["next_time"] = now + cycle_cooldown
 
         return
-
-    # ---------------- Boss 5: triple slash + swap sides ----------------
+    # ---------------- Boss 5: boomerang sword -> punish -> red mark -> teleport ----------------
     if btype == "boss5":
         boss.bottom = GROUND_Y
+
+        windup_ms   = int(cfg.get("windup_ms", 600))
+        sword_spd   = int(cfg.get("sword_speed", ss(10)))
+        sword_w     = int(cfg.get("sword_w", ss(18)))
+        sword_h     = int(cfg.get("sword_h", ss(10)))
+        punish_ms   = int(cfg.get("punish_ms", 5000))
+        mark_ms     = int(cfg.get("tele_mark_ms", 2000))
+        mark_w      = int(cfg.get("tele_w", ss(60)))
+        mark_h      = int(cfg.get("tele_h", ss(26)))
+
         boss_aux.setdefault("phase", "windup")
-        boss_aux.setdefault("slashes_done", 0)
-        boss_aux.setdefault("next_time", now + 400)
+        boss_aux.setdefault("next_time", now + windup_ms)
 
-        if boss_aux["phase"] == "windup":
+        def _spawn_sword(target_x):
+            r = pygame.Rect(boss.centerx - sword_w // 2, boss.centery - sword_h // 2, sword_w, sword_h)
+            hz = {"kind": "sword", "rect": r, "vx": 0, "vy": 0, "life": max(1, int(4000 / 16))}
+            hz["target_x"] = int(target_x)
+            hz["state"] = "out"  # out -> back
+            hazards.append(hz)
+            boss_aux["sword_hz"] = hz
+
+        def _spawn_mark(x_center):
+            r = pygame.Rect(int(x_center - mark_w // 2), int(GROUND_Y - mark_h), int(mark_w), int(mark_h))
+            hazards.append({"kind": "tele_mark", "rect": r, "life": max(1, int(mark_ms / 16))})
+            boss_aux["mark_x"] = int(x_center)
+
+        phase = boss_aux["phase"]
+
+        if phase == "windup":
             if now >= boss_aux["next_time"]:
-                boss_aux["phase"] = "slash"
-                boss_aux["next_time"] = now
+                boss_aux["lock_x"] = player.centerx
+                _spawn_sword(boss_aux["lock_x"])
+                boss_aux["phase"] = "sword_flight"
 
-        elif boss_aux["phase"] == "slash":
-            direction = 1 if player.centerx > boss.centerx else -1
-            spawn_slash_wave(direction)
-            boss_aux["slashes_done"] += 1
-            if boss_aux["slashes_done"] < int(cfg.get("slash_count", 3)):
-                boss_aux["phase"] = "gap"
-                boss_aux["next_time"] = now + int(cfg.get("slash_gap_ms", 1000))
+        elif phase == "sword_flight":
+            hz = boss_aux.get("sword_hz")
+            if not hz or hz not in hazards:
+                boss_aux["phase"] = "punish"
+                boss_aux["next_time"] = now + punish_ms
             else:
-                boss_aux["phase"] = "swap_wait"
-                boss_aux["next_time"] = now + int(cfg.get("swap_pause_ms", 700))
-
-        elif boss_aux["phase"] == "gap":
-            if now >= boss_aux["next_time"]:
-                boss_aux["phase"] = "slash"
-
-        elif boss_aux["phase"] == "swap_wait":
-            if now >= boss_aux["next_time"]:
-                if boss.centerx < WIDTH // 2:
-                    boss.left = RIGHT_WALL.left - boss.width - ss(40)
+                r = hz["rect"]
+                if hz.get("state") == "out":
+                    tx = hz.get("target_x", player.centerx)
+                    dirx = 1 if tx > r.centerx else -1
+                    r.x += dirx * sword_spd
+                    if (dirx > 0 and r.centerx >= tx) or (dirx < 0 and r.centerx <= tx):
+                        hz["state"] = "back"
                 else:
-                    boss.left = LEFT_WALL.right + ss(40)
-                boss_aux["slashes_done"] = 0
+                    tx = boss.centerx
+                    dirx = 1 if tx > r.centerx else -1
+                    r.x += dirx * sword_spd
+                    if r.colliderect(boss.inflate(ss(40), ss(40))):
+                        if hz in hazards:
+                            hazards.remove(hz)
+                        boss_aux.pop("sword_hz", None)
+                        boss_aux["phase"] = "punish"
+                        boss_aux["next_time"] = now + punish_ms
+
+        elif phase == "punish":
+            if now >= boss_aux["next_time"]:
+                boss_aux["lock_x"] = player.centerx
+                _spawn_mark(boss_aux["lock_x"])
+                boss_aux["phase"] = "teleport_wait"
+                boss_aux["next_time"] = now + mark_ms
+
+        elif phase == "teleport_wait":
+            if now >= boss_aux["next_time"]:
+                tx = int(boss_aux.get("mark_x", player.centerx)) - boss.width // 2
+                tx = max(LEFT_WALL.right + ss(40), min(tx, RIGHT_WALL.left - boss.width - ss(40)))
+                boss.x = tx
                 boss_aux["phase"] = "windup"
-                boss_aux["next_time"] = now + 400
+                boss_aux["next_time"] = now + windup_ms
 
         return
+
 
     # ---------------- Boss 6: dash -> recover -> needle fan ----------------
     if btype == "boss6":
@@ -1036,9 +1093,14 @@ def draw_gameplay():
 
     # Hazards
     for hz in hazards:
-        pygame.draw.rect(screen, HAZARD_COLOR, hz["rect"])
-
-    # Player
+        kind = hz.get("kind", "haz")
+        if kind == "tele_mark":
+            pygame.draw.rect(screen, (255, 60, 60), hz["rect"], 3)
+        elif kind == "sword":
+            pygame.draw.rect(screen, (255, 160, 160), hz["rect"])
+        else:
+            pygame.draw.rect(screen, HAZARD_COLOR, hz["rect"])
+# Player
     pygame.draw.rect(screen, BLUE, player)
 
     # Enemies
@@ -1432,8 +1494,6 @@ while running:
 
 pygame.quit()
 sys.exit()
-
-
 
 
 
