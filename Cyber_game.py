@@ -5,6 +5,7 @@ import webbrowser
 from pathlib import Path
 
 import pygame
+import os
 import math
 import requests
 
@@ -55,6 +56,80 @@ else:
 # BASIC SETUP
 # ---------------------------------------------------------------------
 screen = pygame.display.set_mode((0, 0), pygame.FULLSCREEN)  # windowed for debugging
+
+# Keep these available for background scaling and UI
+WIDTH, HEIGHT = screen.get_size()
+
+
+
+# ---------------- Backgrounds ----------------
+# Files (PNG) in the same folder as this .py:
+# background_1.png, background_2.png, background_3.png, background_4.png, background_5.png
+BASE_DIR = os.path.dirname(__file__)
+
+def _load_bg_png(name_no_ext, w, h):
+    """Load and scale a PNG background. Returns None if missing."""
+    try:
+        path = os.path.join(BASE_DIR, f"{name_no_ext}.png")
+        img = pygame.image.load(path).convert()
+        return pygame.transform.smoothscale(img, (w, h))
+    except Exception as e:
+        print(f"[BG] Could not load {name_no_ext}.png -> {e}")
+        return None
+
+# Load all backgrounds once (fast)
+BG_1 = _load_bg_png("background_1", WIDTH, HEIGHT)
+BG_2 = _load_bg_png("background_2", WIDTH, HEIGHT)
+BG_3 = _load_bg_png("background_3", WIDTH, HEIGHT)
+BG_4 = _load_bg_png("background_4", WIDTH, HEIGHT)
+BG_5 = _load_bg_png("background_5", WIDTH, HEIGHT)
+
+def get_level_background(level_index, levels):
+    """Background mapping:
+    - Level 2 (platforms) MUST be background_1.png
+    - Use the rest across other levels/bosses
+    """
+    # Level 2 is index 1 (0-based)
+    if level_index in (0, 1) and BG_1:
+        return BG_1
+
+    # Boss levels (by boss type)
+    try:
+        cfg = levels[level_index].get("boss_cfg")
+        if cfg:
+            btype = cfg.get("type", "")
+            if btype == "boss4" and BG_4: return BG_4
+            if btype == "boss5" and BG_5: return BG_5
+            if btype == "boss6" and BG_3: return BG_3
+            if btype == "boss3" and BG_3: return BG_3
+    except Exception:
+        pass
+
+    # Level 1 + fallback
+    return BG_2 or BG_3 or BG_4 or BG_5 or BG_1
+
+def draw_background(level_index, levels):
+    bg = get_level_background(level_index, levels)
+    if bg:
+        screen.blit(bg, (0, 0))
+    else:
+        screen.fill((10, 10, 18))  # fallback if no images
+
+    # Dark overlay so sprites/platforms are readable
+    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 90))  # tweak 0-160
+    screen.blit(overlay, (0, 0))
+    bg = get_level_background(level_index, levels)
+    if bg:
+        screen.blit(bg, (0, 0))
+    else:
+        screen.fill((10, 10, 18))  # fallback
+
+    # Dark overlay so sprites are readable
+    overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 90))
+    screen.blit(overlay, (0, 0))
+
 WIDTH, HEIGHT = screen.get_size()
 pygame.display.set_caption("WASK")
 clock = pygame.time.Clock()
@@ -125,16 +200,6 @@ if load_music():
     set_music_volume(False)
     pygame.mixer.music.play(-1)
 
-# ---------------------------------------------------------------------
-# BACKGROUND IMAGE (LEVEL 2)
-# ---------------------------------------------------------------------
-background2 = None
-try:
-    img = pygame.image.load("background_1.jpg").convert()
-    background2 = pygame.transform.scale(img, (WIDTH, HEIGHT))
-    print("Loaded background_1.jpg")
-except Exception as e:
-    print("Could not load background_1.jpg:", e)
 
 # ---------------------------------------------------------------------
 # PLAYER & MOVEMENT
@@ -933,14 +998,6 @@ def draw_button(rect, label, active=False):
 
 def draw_cyber_background(title=None, subtitle=None):
     """Shared background/theme used by menu, question, win and lose screens."""
-    if "background2" in globals() and background2 is not None:
-        bg = pygame.transform.smoothscale(background2, (WIDTH, HEIGHT))
-        screen.blit(bg, (0, 0))
-        overlay = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
-        overlay.fill((0, 0, 0, 190))
-        screen.blit(overlay, (0, 0))
-    else:
-        screen.fill((5, 5, 12))
 
     # Subtle scanlines
     scan = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
@@ -1080,16 +1137,15 @@ def draw_center_panel(title, buttons):
         cyber_button(r, label, r.collidepoint(mx, my))
 
 def draw_gameplay():
-    # Background
-    if level_index == 1 and background2:
-        # Level 2: show only the background, belts = platforms
-        screen.blit(background2, (0, 0))
-    else:
-        # Other levels: simple background + visible platforms
-        screen.fill(BLACK)
-        pygame.draw.rect(screen, GREEN, (0, GROUND_Y, WIDTH, ss(GROUND_H)))
+    # Background (per level/boss)
+    draw_background(level_index, levels)
+
+    # Ground + platforms (always draw so gameplay reads clearly)
+    # Platforms are invisible on Level 2 (platform stage) but still collide
+    if level_index != 1:
         for p in platforms:
             pygame.draw.rect(screen, BLUE, p)
+
 
     # Hazards
     for hz in hazards:
@@ -1494,6 +1550,13 @@ while running:
 
 pygame.quit()
 sys.exit()
+
+
+
+
+
+
+
 
 
 
