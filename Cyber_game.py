@@ -278,6 +278,21 @@ def load_music():
                 pass
     return False
 
+def load_sound(*names):
+    if not pygame.mixer.get_init():
+        return None
+    search_roots = [Path.cwd(), Path(__file__).parent]
+    for name in names:
+        for root in search_roots:
+            p = root / name
+            if p.exists():
+                try:
+                    snd = pygame.mixer.Sound(str(p))
+                    return snd
+                except Exception as e:
+                    print(f"[SFX] Could not load {p} -> {e}")
+    return None
+
 def set_music_volume(duck=False):
     if not pygame.mixer.get_init():
         return
@@ -289,6 +304,10 @@ def set_music_volume(duck=False):
 if load_music():
     set_music_volume(False)
     pygame.mixer.music.play(-1)
+
+hurt_sound = load_sound("steve-old-hurt-sound_3cQdSVW.mp3", "hurt.mp3", "hurt.wav")
+if hurt_sound is not None:
+    hurt_sound.set_volume(1.0)
 
 
 # ---------------------------------------------------------------------
@@ -452,6 +471,8 @@ LEVELS_BASE = [
             "sweep_ms": 650,
             "ripple_speed": 7,
             "tired_ms": 9000,
+            "slam_jump": -12,
+            "slam_gravity": 0.7,
         },
     },
 ]
@@ -1183,15 +1204,26 @@ def update_boss():
 
     # ---------------- Boss 7: easier combo boss with repositioning ----------------
     if btype == "boss7":
-        boss.bottom = GROUND_Y
         tele_ms = int(cfg.get("telegraph_ms", 1500))
         attack_gap_ms = int(cfg.get("attack_gap_ms", 1200))
         tired_ms = int(cfg.get("tired_ms", 9000))
         move_speed = int(cfg.get("move_speed", ss(5)))
+        slam_jump = float(cfg.get("slam_jump", -12 * S))
+        slam_gravity = float(cfg.get("slam_gravity", 0.7 * S))
 
         left_stop = LEFT_WALL.right + ss(120)
         center_stop = (LEFT_WALL.right + RIGHT_WALL.left - boss.width) // 2
         right_stop = RIGHT_WALL.left - boss.width - ss(120)
+
+        boss_aux.setdefault("phase", "move_shot")
+        boss_aux.setdefault("next_time", now + tele_ms)
+        boss_aux.setdefault("tele_added", False)
+
+        phase = boss_aux["phase"]
+
+        if phase not in ("slam_jump", "slam_fall"):
+            boss.bottom = GROUND_Y
+            boss_vy = 0.0
 
         def move_boss_to(target_x):
             target_x = max(LEFT_WALL.right + ss(40), min(int(target_x), RIGHT_WALL.left - boss.width - ss(40)))
@@ -1203,12 +1235,6 @@ def update_boss():
             else:
                 boss.x -= move_speed
             return False
-
-        boss_aux.setdefault("phase", "move_shot")
-        boss_aux.setdefault("next_time", now + tele_ms)
-        boss_aux.setdefault("tele_added", False)
-
-        phase = boss_aux["phase"]
 
         if phase == "move_shot":
             # Move away from the player before firing so the shot is easier to read.
@@ -1259,7 +1285,7 @@ def update_boss():
                     right_rect = pygame.Rect(boss.right, GROUND_Y - boss.height, max(1, RIGHT_WALL.left - boss.right), boss.height)
                     add_telegraph(right_rect, tele_ms)
                 elif phase == "tele_ripple":
-                    ripple_rect = pygame.Rect(LEFT_WALL.right, GROUND_Y - ss(20), RIGHT_WALL.left - LEFT_WALL.right, ss(20))
+                    ripple_rect = pygame.Rect(LEFT_WALL.right, GROUND_Y - ss(24), RIGHT_WALL.left - LEFT_WALL.right, ss(24))
                     add_telegraph(ripple_rect, tele_ms)
                 boss_aux["tele_added"] = True
 
@@ -1288,10 +1314,25 @@ def update_boss():
                 boss_aux["tele_added"] = False
 
             elif phase == "tele_ripple" and now >= boss_aux["next_time"]:
-                spawn_ground_ripple(speed=int(cfg.get("ripple_speed", ss(7))))
+                boss_vy = slam_jump
+                boss_aux["phase"] = "slam_jump"
+                boss_aux["tele_added"] = False
+
+        elif phase == "slam_jump":
+            boss_vy += slam_gravity
+            boss.y += int(boss_vy)
+            if boss_vy >= 0:
+                boss_aux["phase"] = "slam_fall"
+
+        elif phase == "slam_fall":
+            boss_vy += slam_gravity
+            boss.y += int(boss_vy)
+            if boss.bottom >= GROUND_Y:
+                boss.bottom = GROUND_Y
+                boss_vy = 0.0
+                spawn_ground_ripple(speed=int(cfg.get("ripple_speed", ss(7))), boss3_style=True)
                 boss_aux["phase"] = "tired"
                 boss_aux["next_time"] = now + tired_ms
-                boss_aux["tele_added"] = False
 
         elif phase == "sword_flight":
             hz = boss_aux.get("sword_hz")
@@ -1338,6 +1379,13 @@ def damage_player():
 
     lives -= 1
     player_invuln_until = now + 1000
+
+    if hurt_sound is not None:
+        try:
+            hurt_sound.stop()
+            hurt_sound.play()
+        except Exception as e:
+            print(f"[SFX] Hurt sound failed -> {e}")
 
     # Keep the player where they were, just stop current movement a bit.
     player_vel_y = 0.0
@@ -1926,6 +1974,13 @@ while running:
 
 pygame.quit()
 sys.exit()
+
+
+
+
+
+
+
 
 
 
