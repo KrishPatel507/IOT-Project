@@ -746,7 +746,8 @@ def handle_answer(choice_index):
         trigger_sphero_on_correct()
     if q_callback:
         q_callback(correct)
-    game_state = "play"
+    if game_state == "question":
+        game_state = "play"
     set_music_volume(False)
 
 # ---------------------------------------------------------------------
@@ -1874,22 +1875,32 @@ while running:
         else:
             # Boss level
             if boss_defeated:
-                # After each boss: portal -> question -> next boss
                 if portal and player.colliderect(portal):
                     q, opts, cidx = random.choice(mc_questions)
 
-                    def after_boss_portal(correct):
-                        global level_index, game_state
-                        if not correct:
-                            return
-                        # Advance to next boss/level, or win after the last boss
-                        if level_index + 1 < len(levels):
-                            level_index += 1
-                            reset_level(level_index)
-                        else:
+                    # Final boss gets ONE final question, then goes straight to win.
+                    if level_index >= len(levels) - 1:
+                        def after_final_boss_question(correct):
+                            global game_state, portal, boss_defeated
+                            portal = None
+                            boss_defeated = False
                             game_state = "win"
 
-                    start_question(q, opts, cidx, after_boss_portal)
+                        start_question(q, opts, cidx, after_final_boss_question)
+                    else:
+                        # Earlier bosses still advance only if the answer is correct.
+                        def after_boss_portal(correct):
+                            global level_index, game_state, portal
+                            portal = None
+                            if not correct:
+                                return
+                            if level_index + 1 < len(levels):
+                                level_index += 1
+                                reset_level(level_index)
+                            else:
+                                game_state = "win"
+
+                        start_question(q, opts, cidx, after_boss_portal)
             else:
                 update_boss()
                 update_hazards()
@@ -1974,18 +1985,6 @@ while running:
 
 pygame.quit()
 sys.exit()
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 
