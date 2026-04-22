@@ -145,7 +145,7 @@ LEADERBOARD_HTML = """<!doctype html>
     .wrap{ max-width:980px; margin:0 auto; padding:22px 18px 40px; }
     .hero{ display:flex; align-items:flex-end; justify-content:space-between; gap:16px; padding:18px 18px; }
     .brand{ display:flex; flex-direction:column; gap:6px; }
-    .logo{ letter-spacing:.22em; font-weight:800; font-size:20px; color:#fff; text-shadow: var(--glow); }
+    .logo{ margin:0; letter-spacing:.22em; font-weight:800; font-size:20px; color:#fff; text-shadow: var(--glow); }
     .sub{ color:var(--muted); font-size:13px; }
     .actions{ display:flex; gap:10px; align-items:center; }
     .btn{ display:inline-flex; align-items:center; gap:8px; padding:10px 12px; border-radius:12px; border:1px solid rgba(255,255,255,.10); background:rgba(11,13,20,.65); color:var(--text); text-decoration:none; font-size:13px; box-shadow: 0 8px 26px rgba(0,0,0,.35); }
@@ -175,7 +175,7 @@ LEADERBOARD_HTML = """<!doctype html>
   <div class="topbar">
     <div class="wrap hero">
       <div class="brand">
-        <div class="logo">WASK</div>
+        <h1 class="logo">WASK</h1>
         <div class="sub">Global Leaderboard — Fastest time wins</div>
       </div>
       <div class="actions">
@@ -281,5 +281,3 @@ init_db()
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "5000"))
     app.run(host="0.0.0.0", port=port, debug=True)
-
-
