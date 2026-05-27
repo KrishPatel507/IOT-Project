@@ -360,14 +360,16 @@ LEVELS_BASE = [
             (300, BASE_H - 90, 250, 500),
             (600, BASE_H - 90, 550, 750),
         ],
-        # These rects line up with the BELTS in the background art
+        # These rects are the REAL visible top surfaces of the belts.
+        # The old values used large invisible rectangles, which let the
+        # player float in mid-air beside the belt artwork.
         "platforms": [
-            (170, 292, 320, 40),  # LOWER belt
-            (470, 215, 320, 40),  # UPPER belt
+            (208, 334, 178, 8),  # LOWER belt visible top surface
+            (431, 233, 176, 8),  # UPPER belt visible top surface
         ],
         "collectibles": [
-            (170 + 150, 292 - 26),  # above lower belt
-            (470 + 150, 215 - 26),  # above upper belt
+            (208 + 90, 334 - 42),  # above lower belt
+            (431 + 90, 233 - 42),  # above upper belt
         ],
         "boss": None,
     },
@@ -524,6 +526,22 @@ enemies = []
 enemy_dirs = []
 enemy_alive = []
 platforms = []
+
+
+# Accurate one-way collision for Level 2 belt platforms.
+# The platform artwork has transparent space around the belt, so using the
+# full pygame.Rect lets the player stand on invisible edges. This returns a
+# much thinner hitbox that matches only the visible top surface.
+def platform_top_hitbox(platform_rect):
+    # Platform rects are already set to the visible belt surface, so do not
+    # add extra offsets here. Adding offsets was causing the player to land on
+    # invisible space and look like they were floating.
+    return pygame.Rect(
+        platform_rect.x,
+        platform_rect.y,
+        platform_rect.width,
+        max(ss(6), platform_rect.height),
+    )
 collectibles = []
 collected = []
 portal = None
@@ -560,6 +578,15 @@ typing_name = True
 game_start_time = None
 run_finished = False
 final_time = None
+time_penalty_s = 0.0  # Added time from taking damage or respawning after death
+
+def get_current_run_time():
+    """Return the current leaderboard time including life/death penalties."""
+    if game_start_time is None:
+        return final_time or 0.0
+    if run_finished and final_time is not None:
+        return final_time
+    return (time.time() - game_start_time) + time_penalty_s
 
 # Questions
 tf_questions = [
@@ -690,11 +717,12 @@ def reset_level(idx):
 # ---------------------------------------------------------------------
 def start_run():
     global level_index, lives, projectiles
-    global game_start_time, run_finished, final_time
+    global game_start_time, run_finished, final_time, time_penalty_s
     level_index = 0
     lives = 3
     projectiles = []
     game_start_time = time.time()
+    time_penalty_s = 0.0
     run_finished = False
     final_time = None
     reset_level(0)
@@ -1372,13 +1400,14 @@ def update_boss():
 
 # ---------------------------------------------------------------------
 def damage_player():
-    global lives, player_invuln_until, player_vel_y, player_on_ground, can_double_jump, telegraphs
+    global lives, player_invuln_until, player_vel_y, player_on_ground, can_double_jump, telegraphs, time_penalty_s
 
     now = pygame.time.get_ticks()
     if now < player_invuln_until:
         return
 
     lives -= 1
+    time_penalty_s += 1.0  # losing a life adds 1 second to the leaderboard time
     player_invuln_until = now + 1000
 
     if hurt_sound is not None:
@@ -1623,12 +1652,8 @@ def draw_gameplay():
     # HUD – lives text (health bar removed)
     screen.blit(FONT_SM.render(f"Lives: {lives}", True, WHITE), (ss(10), ss(10)))
 
-    # Timer
-    global final_time
-    if game_start_time is not None and not run_finished:
-        elapsed = time.time() - game_start_time
-    else:
-        elapsed = final_time or 0.0
+    # Timer includes time penalties from losing lives / respawning.
+    elapsed = get_current_run_time()
     t_txt = FONT_SM.render(f"Time: {elapsed:.2f}s", True, WHITE)
     screen.blit(t_txt, (ss(10), ss(50)))
 
@@ -1792,18 +1817,19 @@ while running:
             player_vel_y = 0
             player_on_ground = True
 
-        # Platforms (Level 2 belts are platforms; other levels may have none)
+        # Platforms (Level 2 belts are one-way platforms)
+        # Use a smaller top-only hitbox so the player cannot stand on invisible
+        # sides/transparent parts of the platform image.
         for p in platforms:
-            if player.colliderect(p):
-                # Landing on top
-                if player_vel_y >= 0 and prev_bottom <= p.top:
-                    player.bottom = p.top
+            platform_hitbox = platform_top_hitbox(p)
+
+            if player.colliderect(platform_hitbox):
+                # Only land when falling from above. This stops side/underside
+                # collisions from making the player float next to platforms.
+                if player_vel_y >= 0 and prev_bottom <= platform_hitbox.top + ss(4):
+                    player.bottom = platform_hitbox.top
                     player_vel_y = 0
                     player_on_ground = True
-                # Hitting underside
-                elif player_vel_y < 0 and prev_top >= p.bottom:
-                    player.top = p.bottom
-                    player_vel_y = 0
 
         # Enemies
         for i, (er, lo, hi) in enumerate(enemies):
@@ -1906,12 +1932,13 @@ while running:
                 update_hazards()
 
         # Lose condition
+        # Dying no longer submits a leaderboard result or restarts the whole game.
+        # The player can respawn at the start of the current level, but gets a
+        # 3-second penalty on top of the 1-second life-loss penalty.
         if lives <= 0:
+            time_penalty_s += 3.0
+            final_time = get_current_run_time()
             game_state = "game_over"
-            if (not run_finished) and game_start_time is not None:
-                final_time = time.time() - game_start_time
-                run_finished = True
-                submit_result_async(player_name, player_email, final_time, "lose")
 
         draw_gameplay()
 
@@ -1934,15 +1961,16 @@ while running:
         draw_center_panel("YOU DIED", buttons)
 
         if final_time is not None:
-            t = FONT_MD.render(f"Final Time: {final_time:.2f}s", True, WHITE)
+            t = FONT_MD.render(f"Current Time: {final_time:.2f}s", True, WHITE)
             screen.blit(t, (WIDTH // 2 - t.get_width() // 2, int(HEIGHT * 0.36)))
 
         if clicked and click_pos:
             r0, r1, r2 = buttons[0][1], buttons[1][1], buttons[2][1]
             if r0.collidepoint(click_pos):
+                # Restart the current level only. Do not reset the timer; the
+                # added penalties stay in the run so the leaderboard is fair.
                 lives = 3
                 reset_level(level_index)
-                game_start_time = time.time()
                 run_finished = False
                 final_time = None
                 game_state = "play"
@@ -1954,7 +1982,7 @@ while running:
     # ========================== WIN SCREEN =======================
     elif game_state == "win":
         if (not run_finished) and game_start_time is not None:
-            final_time = time.time() - game_start_time
+            final_time = get_current_run_time()
             run_finished = True
             submit_result_async(player_name, player_email, final_time, "win")
 
