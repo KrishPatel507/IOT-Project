@@ -578,6 +578,7 @@ typing_name = True
 game_start_time = None
 run_finished = False
 final_time = None
+game_completed = False  # Only True after the final boss/game completion
 time_penalty_s = 0.0  # Added time from taking damage or respawning after death
 
 def get_current_run_time():
@@ -717,7 +718,7 @@ def reset_level(idx):
 # ---------------------------------------------------------------------
 def start_run():
     global level_index, lives, projectiles
-    global game_start_time, run_finished, final_time, time_penalty_s
+    global game_start_time, run_finished, final_time, game_completed, time_penalty_s
     level_index = 0
     lives = 3
     projectiles = []
@@ -725,6 +726,7 @@ def start_run():
     time_penalty_s = 0.0
     run_finished = False
     final_time = None
+    game_completed = False
     reset_level(0)
 
 # ---------------------------------------------------------------------
@@ -1483,10 +1485,10 @@ def draw_menu():
     mx, my = pygame.mouse.get_pos()
 
     cyber_button(play_rect,  "Play",        play_rect.collidepoint(mx, my))
-    cyber_button(board_rect, "Leaderboard", board_rect.collidepoint(mx, my))
+    cyber_button(board_rect, "Leaderboard Locked", False)
     cyber_button(quit_rect,  "Quit",        quit_rect.collidepoint(mx, my))
 
-    hint = "START/SELECT: play    CLICK: select    ESC: quit"
+    hint = "Leaderboard unlocks only after beating the final boss"
     hint_surf = FONT_SM.render(hint, True, (170, 170, 180))
     screen.blit(hint_surf, hint_surf.get_rect(center=(WIDTH // 2, int(HEIGHT * 0.92))))
 
@@ -1728,8 +1730,9 @@ while running:
                 email_text = ""
                 typing_name = True
             elif board_r.collidepoint(click_pos):
-                # Cache-bust so the browser doesn't show an old leaderboard.
-                webbrowser.open(f"{LEADERBOARD_WEB_URL}?t={int(time.time())}")
+                # Leaderboard is intentionally locked from the main menu.
+                # It only opens after the player fully completes the game.
+                pass
 
             elif quit_r.collidepoint(click_pos):
                 running = False
@@ -1889,12 +1892,13 @@ while running:
                 q, opts, cidx = random.choice(mc_questions)
 
                 def after_portal(correct):
-                    global level_index, game_state
+                    global level_index, game_state, game_completed
                     if correct:
                         if level_index + 1 < len(levels):
                             level_index += 1
                             reset_level(level_index)
                         else:
+                            game_completed = True
                             game_state = "win"
 
                 start_question(q, opts, cidx, after_portal)
@@ -1907,16 +1911,17 @@ while running:
                     # Final boss gets ONE final question, then goes straight to win.
                     if level_index >= len(levels) - 1:
                         def after_final_boss_question(correct):
-                            global game_state, portal, boss_defeated
+                            global game_state, portal, boss_defeated, game_completed
                             portal = None
                             boss_defeated = False
+                            game_completed = True
                             game_state = "win"
 
                         start_question(q, opts, cidx, after_final_boss_question)
                     else:
                         # Earlier bosses still advance only if the answer is correct.
                         def after_boss_portal(correct):
-                            global level_index, game_state, portal
+                            global level_index, game_state, portal, game_completed
                             portal = None
                             if not correct:
                                 return
@@ -1924,6 +1929,7 @@ while running:
                                 level_index += 1
                                 reset_level(level_index)
                             else:
+                                game_completed = True
                                 game_state = "win"
 
                         start_question(q, opts, cidx, after_boss_portal)
@@ -1981,7 +1987,10 @@ while running:
 
     # ========================== WIN SCREEN =======================
     elif game_state == "win":
-        if (not run_finished) and game_start_time is not None:
+        # Only submit to / open the leaderboard after the full game is complete.
+        # This prevents normal level completion, deaths, or partial runs from
+        # being recorded on the online leaderboard.
+        if game_completed and (not run_finished) and game_start_time is not None:
             final_time = get_current_run_time()
             run_finished = True
             submit_result_async(player_name, player_email, final_time, "win")
@@ -2005,7 +2014,8 @@ while running:
                 email_text = ""
                 typing_name = True
             elif r1.collidepoint(click_pos):
-                webbrowser.open(f"{LEADERBOARD_WEB_URL}?t={int(time.time())}")
+                if game_completed:
+                    webbrowser.open(f"{LEADERBOARD_WEB_URL}?t={int(time.time())}")
             elif r2.collidepoint(click_pos):
                 running = False
 
@@ -2013,6 +2023,18 @@ while running:
 
 pygame.quit()
 sys.exit()
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
