@@ -21,7 +21,7 @@ pygame.event.set_allowed([pygame.QUIT, pygame.KEYDOWN, pygame.KEYUP, pygame.MOUS
 BASE_URL = "https://iot-project-2-5afi.onrender.com"
 API_URL = BASE_URL + "/api/leaderboard"
 SUBMIT_URL = BASE_URL + "/submit_result"
-LEADERBOARD_WEB_URL = BASE_URL + "/"
+LEADERBOARD_WEB_URL = BASE_URL + "/leaderboard"
 # -------------------------------
 
 
@@ -241,6 +241,7 @@ FONT_XL = pygame.font.SysFont("Arial", max(24, int(HEIGHT * 0.12)))
 FONT_LG = pygame.font.SysFont("Arial", max(20, int(HEIGHT * 0.08)))
 FONT_MD = pygame.font.SysFont("Arial", max(16, int(HEIGHT * 0.05)))
 FONT_SM = pygame.font.SysFont("Arial", max(12, int(HEIGHT * 0.035)))
+FONT_BOSS_NAME = pygame.font.SysFont("Arial", max(20, int(HEIGHT * 0.055)))
 
 # Colours
 BLACK  = (0, 0, 0)
@@ -562,6 +563,24 @@ boss_next_time = 0
 hazards = []   # list of {"rect":..., "dir":-1/1, "speed":..., "life":...}
 telegraphs = []
 
+# Boss display names. These names appear on the boss HP bar and above the boss sprite.
+BOSS_NAMES = {
+    "boss3": "W",
+    "boss4": "A",
+    "boss5": "S",
+    "boss6": "K",
+    "boss7": "WASK",
+}
+
+def current_boss_name():
+    try:
+        cfg = levels[level_index]["boss_cfg"]
+        if cfg:
+            return BOSS_NAMES.get(cfg.get("type"), "BOSS")
+    except Exception:
+        pass
+    return "BOSS"
+
 last_sphero_trigger_time = 0.0
 SPHERO_COOLDOWN_SECONDS = 10.0
 
@@ -579,7 +598,13 @@ game_start_time = None
 run_finished = False
 final_time = None
 game_completed = False  # Only True after the final boss/game completion
+leaderboard_submitted = False
+leaderboard_submit_in_progress = False
+leaderboard_submit_error = ""
+last_submit_attempt_ms = 0
+submit_attempt_count = 0
 time_penalty_s = 0.0  # Added time from taking damage or respawning after death
+DEATH_TIME_PENALTY = 10.0  # Losing all lives adds 10 seconds, but the run can still be completed.
 
 def get_current_run_time():
     """Return the current leaderboard time including life/death penalties."""
@@ -616,15 +641,19 @@ def submit_result_to_server(name, email, time_s, outcome):
     payload = {
         "name": name or "Player",
         "email": email or "",
+        # Server uses time_s/outcome, but time/result are included as a safe backup
+        # for older versions of the Render server.
         "time_s": float(time_s),
         "outcome": outcome,
+        "time": float(time_s),
+        "result": outcome,
     }
 
     print("SUBMIT ->", url)
     print("PAYLOAD ->", payload)
 
-    # Shorter timeouts keep the background worker light.
-    for t in (2.0, 4.0):
+    # Render can be slow to wake up, so try a few times before giving up.
+    for t in (3.0, 6.0, 10.0):
         try:
             r = requests.post(url, json=payload, timeout=t)
             print("SUBMIT HTTP ->", getattr(r, "status_code", None), (r.text[:200] if hasattr(r, "text") else ""))
@@ -636,9 +665,31 @@ def submit_result_to_server(name, email, time_s, outcome):
     return False
 
 
+def _submit_worker(name, email, time_s, outcome):
+    global leaderboard_submitted, leaderboard_submit_in_progress, leaderboard_submit_error
+    try:
+        ok = submit_result_to_server(name, email, time_s, outcome)
+        leaderboard_submitted = bool(ok)
+        leaderboard_submit_error = "" if ok else "Save failed - press Leaderboard to retry"
+    except Exception as e:
+        leaderboard_submitted = False
+        leaderboard_submit_error = f"Save failed: {e}"
+    finally:
+        leaderboard_submit_in_progress = False
+
 def submit_result_async(name, email, time_s, outcome):
+    """Submit without freezing the pygame window.
+    This prevents the 'not responding / waiting to respond' screen if Render is slow.
+    """
+    global leaderboard_submit_in_progress, submit_attempt_count, last_submit_attempt_ms, leaderboard_submit_error
+    if leaderboard_submitted or leaderboard_submit_in_progress:
+        return
+    leaderboard_submit_in_progress = True
+    leaderboard_submit_error = ""
+    submit_attempt_count += 1
+    last_submit_attempt_ms = pygame.time.get_ticks()
     threading.Thread(
-        target=submit_result_to_server,
+        target=_submit_worker,
         args=(name, email, time_s, outcome),
         daemon=True,
     ).start()
@@ -718,7 +769,7 @@ def reset_level(idx):
 # ---------------------------------------------------------------------
 def start_run():
     global level_index, lives, projectiles
-    global game_start_time, run_finished, final_time, game_completed, time_penalty_s
+    global game_start_time, run_finished, final_time, game_completed, time_penalty_s, leaderboard_submitted, leaderboard_submit_in_progress, leaderboard_submit_error, last_submit_attempt_ms, submit_attempt_count
     level_index = 0
     lives = 3
     projectiles = []
@@ -727,6 +778,11 @@ def start_run():
     run_finished = False
     final_time = None
     game_completed = False
+    leaderboard_submitted = False
+    leaderboard_submit_in_progress = False
+    leaderboard_submit_error = ""
+    last_submit_attempt_ms = 0
+    submit_attempt_count = 0
     reset_level(0)
 
 # ---------------------------------------------------------------------
@@ -1485,12 +1541,8 @@ def draw_menu():
     mx, my = pygame.mouse.get_pos()
 
     cyber_button(play_rect,  "Play",        play_rect.collidepoint(mx, my))
-    cyber_button(board_rect, "Leaderboard Locked", False)
+    cyber_button(board_rect, "Leaderboard", board_rect.collidepoint(mx, my))
     cyber_button(quit_rect,  "Quit",        quit_rect.collidepoint(mx, my))
-
-    hint = "Leaderboard unlocks only after beating the final boss"
-    hint_surf = FONT_SM.render(hint, True, (170, 170, 180))
-    screen.blit(hint_surf, hint_surf.get_rect(center=(WIDTH // 2, int(HEIGHT * 0.92))))
 
     return play_rect, board_rect, quit_rect
 def draw_name_entry():
@@ -1646,10 +1698,20 @@ def draw_gameplay():
         base_hp = max(1, boss_max_hp)
         bw = int(min(500 * Sx, WIDTH * 0.4))
         x0 = WIDTH // 2 - bw // 2
-        pygame.draw.rect(screen, RED, (x0, 10, bw, ss(18)))
+        boss_name = current_boss_name()
+
+        # Move the health bar down so the boss name sits above it, not inside it.
+        bar_y = ss(36)
+        bar_h = ss(18)
+
+        name_label = FONT_BOSS_NAME.render(boss_name, True, WHITE)
+        name_x = x0 + bw // 2 - name_label.get_width() // 2
+        name_y = max(ss(2), bar_y - name_label.get_height() - ss(6))
+        screen.blit(name_label, (name_x, name_y))
+
+        pygame.draw.rect(screen, RED, (x0, bar_y, bw, bar_h))
         fill = max(0, int(bw * (boss_hp / base_hp)))
-        pygame.draw.rect(screen, (80, 220, 120), (x0, 10, fill, ss(18)))
-        screen.blit(FONT_SM.render("BOSS", True, WHITE), (x0 - ss(60), 10))
+        pygame.draw.rect(screen, (80, 220, 120), (x0, bar_y, fill, bar_h))
 
     # HUD – lives text (health bar removed)
     screen.blit(FONT_SM.render(f"Lives: {lives}", True, WHITE), (ss(10), ss(10)))
@@ -1667,6 +1729,109 @@ def draw_gameplay():
     else:
         cd_txt = "Attack Ready"
     screen.blit(FONT_SM.render(cd_txt, True, WHITE), (ss(10), ss(70)))
+
+def fit_font_text(text, max_width, max_height, colour=WHITE, bold=False):
+    """Create text that always fits inside a given button/box."""
+    size = max(12, int(max_height))
+    while size > 10:
+        font = pygame.font.SysFont("Arial", size, bold=bold)
+        surf = font.render(text, True, colour)
+        if surf.get_width() <= max_width and surf.get_height() <= max_height:
+            return surf
+        size -= 2
+    return pygame.font.SysFont("Arial", 10, bold=bold).render(text, True, colour)
+
+def win_button(rect, text, hover=False):
+    fill = (28, 32, 48) if not hover else (42, 54, 78)
+    edge = (100, 220, 255) if hover else (92, 100, 130)
+    pygame.draw.rect(screen, fill, rect, border_radius=12)
+    pygame.draw.rect(screen, edge, rect, 3, border_radius=12)
+    txt = fit_font_text(text.upper(), rect.w - ss(18), rect.h - ss(14), WHITE, bold=True)
+    screen.blit(txt, txt.get_rect(center=rect.center))
+
+def finish_game_and_submit():
+    """Final completion path: calculate time and submit the win result without freezing the game."""
+    global game_state, game_completed, run_finished, final_time
+    game_completed = True
+    game_state = "win"
+    if (not run_finished) and game_start_time is not None:
+        final_time = get_current_run_time()
+        run_finished = True
+    if final_time is not None:
+        submit_result_async(player_name, player_email, final_time, "win")
+
+def draw_win_panel(final_time_value):
+    # Full separate win screen: no gameplay/HUD behind it.
+    screen.fill((4, 7, 14))
+
+    # simple cyber grid background
+    for x in range(0, WIDTH, ss(48)):
+        pygame.draw.line(screen, (8, 18, 30), (x, 0), (x, HEIGHT), 1)
+    for y in range(0, HEIGHT, ss(48)):
+        pygame.draw.line(screen, (8, 18, 30), (0, y), (WIDTH, y), 1)
+
+    panel = pygame.Rect(int(WIDTH * 0.16), int(HEIGHT * 0.10), int(WIDTH * 0.68), int(HEIGHT * 0.80))
+    pygame.draw.rect(screen, (13, 17, 28), panel, border_radius=24)
+    pygame.draw.rect(screen, (80, 220, 255), panel, 3, border_radius=24)
+
+    title = fit_font_text("MISSION COMPLETE", int(panel.w * 0.86), int(panel.h * 0.12), (105, 235, 255), bold=True)
+    screen.blit(title, title.get_rect(center=(panel.centerx, int(panel.y + panel.h * 0.10))))
+
+    subtitle = fit_font_text("Escape the WASK completed successfully", int(panel.w * 0.78), int(panel.h * 0.055), (220, 230, 240), bold=False)
+    screen.blit(subtitle, subtitle.get_rect(center=(panel.centerx, int(panel.y + panel.h * 0.18))))
+
+    if final_time_value is not None:
+        time_box = pygame.Rect(int(panel.x + panel.w * 0.30), int(panel.y + panel.h * 0.23), int(panel.w * 0.40), int(panel.h * 0.11))
+        pygame.draw.rect(screen, (8, 28, 42), time_box, border_radius=14)
+        pygame.draw.rect(screen, (80, 220, 255), time_box, 2, border_radius=14)
+        label = fit_font_text("FINAL TIME", int(time_box.w * 0.86), int(time_box.h * 0.35), (150, 225, 255), bold=True)
+        value = fit_font_text(f"{final_time_value:.2f}s", int(time_box.w * 0.86), int(time_box.h * 0.48), WHITE, bold=True)
+        screen.blit(label, label.get_rect(center=(time_box.centerx, int(time_box.y + time_box.h * 0.30))))
+        screen.blit(value, value.get_rect(center=(time_box.centerx, int(time_box.y + time_box.h * 0.70))))
+
+    roster = [("W", "Will"), ("A", "Alfie"), ("S", "Sheshol"), ("K", "Krish")]
+    colours = [(76, 235, 190), (255, 200, 70), (185, 125, 255), (255, 90, 120)]
+    row_w = int(panel.w * 0.54)
+    row_h = int(panel.h * 0.075)
+    row_x = panel.centerx - row_w // 2
+    row_start_y = int(panel.y + panel.h * 0.40)
+    row_gap = int(panel.h * 0.088)
+
+    for i, ((initial, name), colour) in enumerate(zip(roster, colours)):
+        row = pygame.Rect(row_x, row_start_y + i * row_gap, row_w, row_h)
+        pygame.draw.rect(screen, (18, 24, 36), row, border_radius=12)
+        pygame.draw.rect(screen, colour, row, 2, border_radius=12)
+        init_surf = fit_font_text(initial, int(row.w * 0.18), int(row.h * 0.82), colour, bold=True)
+        name_surf = fit_font_text(name, int(row.w * 0.45), int(row.h * 0.60), WHITE, bold=False)
+        screen.blit(init_surf, init_surf.get_rect(center=(row.x + int(row.w * 0.24), row.centery)))
+        screen.blit(name_surf, name_surf.get_rect(midleft=(row.x + int(row.w * 0.45), row.centery)))
+
+    # Show save status, but keep it short so the screen stays tidy.
+    if leaderboard_submitted:
+        status_text = "Leaderboard saved"
+        status_colour = (120, 255, 160)
+    elif leaderboard_submit_in_progress:
+        status_text = "Saving leaderboard..."
+        status_colour = (255, 210, 90)
+    else:
+        status_text = "Press Leaderboard to retry/open"
+        status_colour = (255, 210, 90)
+    status = fit_font_text(status_text, int(panel.w * 0.70), int(panel.h * 0.04), status_colour, bold=False)
+    screen.blit(status, status.get_rect(center=(panel.centerx, int(panel.y + panel.h * 0.73))))
+
+    labels = ["Play Again", "Leaderboard"]
+    buttons = []
+    bw, bh = int(panel.w * 0.28), int(panel.h * 0.085)
+    gap = int(panel.w * 0.08)
+    total_w = bw * 2 + gap
+    start_x = panel.centerx - total_w // 2
+    by = int(panel.y + panel.h * 0.80)
+    mx, my = pygame.mouse.get_pos()
+    for idx, label in enumerate(labels):
+        rect = pygame.Rect(start_x + idx * (bw + gap), by, bw, bh)
+        win_button(rect, label, rect.collidepoint(mx, my))
+        buttons.append(rect)
+    return buttons
 
 # ---------------------------------------------------------------------
 # INITIALISE FIRST LEVEL
@@ -1730,9 +1895,7 @@ while running:
                 email_text = ""
                 typing_name = True
             elif board_r.collidepoint(click_pos):
-                # Leaderboard is intentionally locked from the main menu.
-                # It only opens after the player fully completes the game.
-                pass
+                webbrowser.open(f"{LEADERBOARD_WEB_URL}?t={int(time.time())}")
 
             elif quit_r.collidepoint(click_pos):
                 running = False
@@ -1898,8 +2061,7 @@ while running:
                             level_index += 1
                             reset_level(level_index)
                         else:
-                            game_completed = True
-                            game_state = "win"
+                            finish_game_and_submit()
 
                 start_question(q, opts, cidx, after_portal)
         else:
@@ -1914,8 +2076,7 @@ while running:
                             global game_state, portal, boss_defeated, game_completed
                             portal = None
                             boss_defeated = False
-                            game_completed = True
-                            game_state = "win"
+                            finish_game_and_submit()
 
                         start_question(q, opts, cidx, after_final_boss_question)
                     else:
@@ -1938,11 +2099,12 @@ while running:
                 update_hazards()
 
         # Lose condition
-        # Dying no longer submits a leaderboard result or restarts the whole game.
-        # The player can respawn at the start of the current level, but gets a
-        # 3-second penalty on top of the 1-second life-loss penalty.
+        # Dying does not submit a lose result and does not end the full run.
+        # The player can respawn at the start of the current level and still
+        # get onto the leaderboard if they finish the game. A full death adds
+        # a 10-second penalty to the final leaderboard time.
         if lives <= 0:
-            time_penalty_s += 3.0
+            time_penalty_s += DEATH_TIME_PENALTY
             final_time = get_current_run_time()
             game_state = "game_over"
 
@@ -1968,13 +2130,15 @@ while running:
 
         if final_time is not None:
             t = FONT_MD.render(f"Current Time: {final_time:.2f}s", True, WHITE)
-            screen.blit(t, (WIDTH // 2 - t.get_width() // 2, int(HEIGHT * 0.36)))
+            screen.blit(t, (WIDTH // 2 - t.get_width() // 2, int(HEIGHT * 0.35)))
+            p_txt = FONT_SM.render("Death penalty applied: +10 seconds", True, (220, 220, 230))
+            screen.blit(p_txt, (WIDTH // 2 - p_txt.get_width() // 2, int(HEIGHT * 0.41)))
 
         if clicked and click_pos:
             r0, r1, r2 = buttons[0][1], buttons[1][1], buttons[2][1]
             if r0.collidepoint(click_pos):
-                # Restart the current level only. Do not reset the timer; the
-                # added penalties stay in the run so the leaderboard is fair.
+                # Restart the current level only. Do not reset the timer; all
+                # life/death penalties stay in the run so the leaderboard is fair.
                 lives = 3
                 reset_level(level_index)
                 run_finished = False
@@ -1987,51 +2151,35 @@ while running:
 
     # ========================== WIN SCREEN =======================
     elif game_state == "win":
-        # Only submit to / open the leaderboard after the full game is complete.
-        # This prevents normal level completion, deaths, or partial runs from
-        # being recorded on the online leaderboard.
+        # Backup: if anything reaches the win state without saving, save now.
         if game_completed and (not run_finished) and game_start_time is not None:
-            final_time = get_current_run_time()
-            run_finished = True
-            submit_result_async(player_name, player_email, final_time, "win")
+            finish_game_and_submit()
 
-        buttons = [
-            ("Restart", pygame.Rect(0, 0, 0, 0)),
-            ("Leaderboard", pygame.Rect(0, 0, 0, 0)),
-            ("Quit", pygame.Rect(0, 0, 0, 0)),
-        ]
-        draw_center_panel("YOU WIN", buttons)
+        # Keep retrying quietly while the win screen is open in case Render was asleep,
+        # but never block the pygame window.
+        now_ms = pygame.time.get_ticks()
+        if game_completed and (not leaderboard_submitted) and (not leaderboard_submit_in_progress) and final_time is not None:
+            if submit_attempt_count < 5 and now_ms - last_submit_attempt_ms > 3500:
+                submit_result_async(player_name, player_email, final_time, "win")
 
-        if final_time is not None:
-            t = FONT_MD.render(f"Final Time: {final_time:.2f}s", True, WHITE)
-            screen.blit(t, (WIDTH // 2 - t.get_width() // 2, int(HEIGHT * 0.36)))
+        win_buttons = draw_win_panel(final_time)
 
         if clicked and click_pos:
-            r0, r1, r2 = buttons[0][1], buttons[1][1], buttons[2][1]
+            r0, r1 = win_buttons[0], win_buttons[1]
             if r0.collidepoint(click_pos):
-                game_state = "name_entry"
-                name_text = ""
-                email_text = ""
-                typing_name = True
+                # Play Again returns to the main menu.
+                game_state = "menu"
             elif r1.collidepoint(click_pos):
                 if game_completed:
+                    # Retry in the background, then open the live leaderboard immediately.
+                    if (not leaderboard_submitted) and (not leaderboard_submit_in_progress) and final_time is not None:
+                        submit_result_async(player_name, player_email, final_time, "win")
                     webbrowser.open(f"{LEADERBOARD_WEB_URL}?t={int(time.time())}")
-            elif r2.collidepoint(click_pos):
-                running = False
 
     pygame.display.flip()
 
 pygame.quit()
 sys.exit()
-
-
-
-
-
-
-
-
-
 
 
 
