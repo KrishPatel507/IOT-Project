@@ -183,11 +183,14 @@ def blit_sprite_fit(filename, rect, flip_x=False, pad_w=0.0, pad_h=0.0, lift=0, 
 
 def get_level_background(level_index, levels):
     """Background mapping:
-    - Level 2 (platforms) MUST be background_1.png
-    - Use the rest across other levels/bosses
+    - Level 1 uses background_2.png
+    - Level 2 (platforms) uses background_1.png
+    - The other backgrounds are reused for boss stages / fallback
     """
-    # Level 2 is index 1 (0-based)
-    if level_index in (0, 1) and BG_1:
+    # Normal stages
+    if level_index == 0 and BG_2:
+        return BG_2
+    if level_index == 1 and BG_1:
         return BG_1
 
     # Boss levels (by boss type)
@@ -203,7 +206,7 @@ def get_level_background(level_index, levels):
     except Exception:
         pass
 
-    # Level 1 + fallback
+    # Fallback order
     return BG_2 or BG_3 or BG_4 or BG_5 or BG_1
 
 def draw_background(level_index, levels):
@@ -423,11 +426,11 @@ LEVELS_BASE = [
             "sword_speed": 10,         # boomerang sword speed (scaled)
             "sword_w": 18,             # sword hitbox width (scaled)
             "sword_h": 10,             # sword hitbox height (scaled)
-            "punish_ms": 5000,         # boss rests on ground so player can attack
+            "punish_ms": 4000,         # slightly shorter rest window so boss 5 is a little harder but still fair
             "tele_mark_ms": 2000,      # red mark duration before teleport
             "tele_w": 60,              # red mark width (scaled)
             "tele_h": 26,              # red mark height (scaled)
-            "windup_ms": 600,          # small windup before throwing sword
+            "windup_ms": 550,          # small windup before throwing sword
             "hp": 16,
             "touch_damage": True,
             "slash_count": 3,
@@ -449,10 +452,10 @@ LEVELS_BASE = [
             "hp": 18,
             "touch_damage": True,
             "telegraph_ms": 1800,
-            "attack_gap_ms": 1400,
+            "attack_gap_ms": 1200,
             "sweep_ms": 700,
             "ripple_speed": 7,
-            "tired_ms": 11000,
+            "tired_ms": 8500,
         },
     },
     {   # LEVEL 7 – BOSS 7 (easy combo boss)
@@ -626,6 +629,18 @@ mc_questions = [
      ["Click the link", "Reply to sender", "Verify via official channel"], 2),
     ("What does phishing try to do?",
      ["Steal your information", "Improve battery life", "Clean malware"], 0),
+    ("What should you do before using a public Wi-Fi network?",
+     ["Check it is the correct network", "Share your password", "Turn off updates"], 0),
+    ("Which password is the strongest?",
+     ["password123", "Krish2008", "T7!mQ9#pL2"], 2),
+    ("What does two-factor authentication add?",
+     ["A second security check", "A faster charger", "More screen brightness"], 0),
+    ("What should you do if a link looks suspicious?",
+     ["Click it quickly", "Avoid it and report it", "Send it to friends"], 1),
+    ("What is malware?",
+     ["Harmful software", "A computer monitor", "A safe password"], 0),
+    ("Why should software updates be installed?",
+     ["They can fix security problems", "They remove all passwords", "They stop the internet"], 0),
 ]
 
 q_text = None
@@ -825,13 +840,52 @@ def trigger_sphero_on_correct():
         print(f"[SPHERO] Trigger failed: {e}")
     return False
 
+def pick_mc_question(exclude_text=None):
+    """Pick a multiple-choice question, avoiding the previous one where possible."""
+    choices = [q for q in mc_questions if q[0] != exclude_text]
+    if not choices:
+        choices = mc_questions
+    return random.choice(choices)
+
+
+def start_retry_mc_question(on_correct_callback, exclude_text=None):
+    """Ask a portal question until the player gets one correct.
+
+    If the player gets it wrong, the portal does not disappear and a new
+    question is shown straight away. Once they answer correctly, the supplied
+    callback runs and the player can advance.
+    """
+    q, opts, cidx = pick_mc_question(exclude_text)
+
+    def retry_callback(correct):
+        if correct:
+            on_correct_callback()
+            return None
+
+        # Wrong answer: stay on the question screen and ask a different question.
+        next_q, next_opts, next_cidx = pick_mc_question(q_text)
+        start_question(next_q, next_opts, next_cidx, retry_callback)
+        return "stay_question"
+
+    start_question(q, opts, cidx, retry_callback)
+
+
 def handle_answer(choice_index):
     global game_state
     correct = (choice_index == q_correct_idx)
     if correct:
         trigger_sphero_on_correct()
+
+    callback_result = None
     if q_callback:
-        q_callback(correct)
+        callback_result = q_callback(correct)
+
+    # Some question callbacks deliberately keep the player on the question
+    # screen, for example portal questions that repeat until answered correctly.
+    if callback_result == "stay_question":
+        set_music_volume(True)
+        return
+
     if game_state == "question":
         game_state = "play"
     set_music_volume(False)
@@ -2052,48 +2106,41 @@ while running:
                 portal = pygame.Rect(WIDTH - ss(80), GROUND_Y - ss(80), ss(40), ss(80))
 
             if portal and player.colliderect(portal):
-                q, opts, cidx = random.choice(mc_questions)
-
-                def after_portal(correct):
+                def advance_after_portal_correct():
                     global level_index, game_state, game_completed
-                    if correct:
-                        if level_index + 1 < len(levels):
-                            level_index += 1
-                            reset_level(level_index)
-                        else:
-                            finish_game_and_submit()
+                    if level_index + 1 < len(levels):
+                        level_index += 1
+                        reset_level(level_index)
+                    else:
+                        finish_game_and_submit()
 
-                start_question(q, opts, cidx, after_portal)
+                start_retry_mc_question(advance_after_portal_correct)
         else:
             # Boss level
             if boss_defeated:
                 if portal and player.colliderect(portal):
-                    q, opts, cidx = random.choice(mc_questions)
-
-                    # Final boss gets ONE final question, then goes straight to win.
+                    # Portal/final questions repeat with a new question if the
+                    # player gets the answer wrong. They only advance once the
+                    # player answers correctly.
                     if level_index >= len(levels) - 1:
-                        def after_final_boss_question(correct):
-                            global game_state, portal, boss_defeated, game_completed
+                        def finish_after_final_question_correct():
+                            global portal, boss_defeated
                             portal = None
                             boss_defeated = False
                             finish_game_and_submit()
 
-                        start_question(q, opts, cidx, after_final_boss_question)
+                        start_retry_mc_question(finish_after_final_question_correct)
                     else:
-                        # Earlier bosses still advance only if the answer is correct.
-                        def after_boss_portal(correct):
-                            global level_index, game_state, portal, game_completed
+                        def advance_after_boss_question_correct():
+                            global level_index, portal
                             portal = None
-                            if not correct:
-                                return
                             if level_index + 1 < len(levels):
                                 level_index += 1
                                 reset_level(level_index)
                             else:
-                                game_completed = True
-                                game_state = "win"
+                                finish_game_and_submit()
 
-                        start_question(q, opts, cidx, after_boss_portal)
+                        start_retry_mc_question(advance_after_boss_question_correct)
             else:
                 update_boss()
                 update_hazards()
@@ -2180,6 +2227,10 @@ while running:
 
 pygame.quit()
 sys.exit()
+
+
+
+
 
 
 
